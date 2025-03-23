@@ -12,6 +12,23 @@ struct sound_seg {
 
 // Load a WAV file into buffer
 void wav_load(const char* filename, int16_t* dest){
+    // fopen file, read
+    FILE* f = fopen(filename, "rb");
+    if (!f) {
+        return;
+    }
+    // get size of file fseek + ftell
+    fseek(f, 44, SEEK_SET);
+    //get left data to dest
+    fseek(f, 0, SEEK_END);
+    long fileSize = ftell(f); // get the position(pointer)
+    long dataSize = fileSize - 44;
+    fseek(f, 44, SEEK_SET);
+    // read dataSize to dest
+    fread(dest, 1, dataSize, f);
+    // close file
+    fclose(f);
+    
     return;
 }
 
