@@ -57,7 +57,7 @@ void wav_save(const char* fname, int16_t* src, size_t len){
     fwrite("WAVE", 1, 4, f);
 
     //fmt fmt + subchunk1Size + PCM
-    fwrite("fmt", 1, 4, f);
+    fwrite("fmt ", 1, 4, f);
     uint32_t subchunk1Size = 16; // PCM
     fwrite(&subchunk1Size, sizeof(uint32_t), 1, f);
 
