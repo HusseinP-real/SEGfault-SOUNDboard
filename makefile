@@ -1,23 +1,23 @@
-# #TODO
-# # compiler
-# CC = gcc
+#TODO
+# compiler
+CC = gcc
 
-# # compile sign
-# CFLAGS = -Wall -Wextra -std=c99 -fPIC #sign
+# compile sign
+CFLAGS = -Wall -Wextra -std=c99 -fPIC #sign
 
-# # target file
-# TARGET_OBJ = sound_seg.o
+# target file
+TARGET_OBJ = sound_seg.o
 
-# SRCS = sound_seg.c
+SRCS = sound_seg.c
 
-# # default target
-# all: $(TARGET_OBJ)
+# default target
+all: $(TARGET_OBJ)
 
-# # make target file
-# $(TARGET_OBJ): $(SRCS)
-# 	$(CC) $(CFLAGS) -c $< -o $@
+# make target file
+$(TARGET_OBJ): $(SRCS)
+	$(CC) $(CFLAGS) -c $< -o $@
 
-# #clean file
-# clean:
-# 	rm -f $(TARGET_OBJ)
+#clean file
+clean:
+	rm -f $(TARGET_OBJ)
 

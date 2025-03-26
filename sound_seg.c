@@ -98,6 +98,7 @@ struct sound_seg* tr_init() {
     // initialize
     track->samples = NULL;
     track->capacity = 0;
+    track->length = 0;
     return track;
 }
 
