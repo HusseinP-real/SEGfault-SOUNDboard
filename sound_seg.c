@@ -7,11 +7,14 @@
 
 
 struct sound_seg {
-    // //TODO
-    uint16_t* samples; // array of samples
+    //TODO
+    int16_t* samples; // array of samples
     size_t capacity; // judge if the array is full
     size_t length; // length of the array
 };
+
+double cross_correlation(const int16_t* a, const int16_t* b, size_t len);
+double auto_correlation(const int16_t* a, size_t len);
 
 // Load a WAV file into buffer
 void wav_load(const char* filename, int16_t* dest){
@@ -127,10 +130,17 @@ size_t tr_length(struct sound_seg* seg) {
 
 // Read len elements from position pos into dest
 void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
+    //check if track samples and dest is null
     if (!track || !track->samples || !dest) return;
     if (pos >= track->length) return;
+
+    //calculate the rest elements can be read
     size_t can_read = track->length - pos;
+
+    //if len of sample is too big let it be the rest of the track
     if (len > can_read) len = can_read;
+
+    //copy the elements into dest
     memcpy(dest, track->samples + pos, len * sizeof(int16_t));
     return;
 }
@@ -139,7 +149,7 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
     if (!track || !src) return;
 
-    // if pose is greater than length, set pos as the end of the track
+    // if position is greater than length, set pos as the end of the track
     if (pos > track->length) pos = track->length;
     size_t end_pos = pos + len;
 
@@ -164,11 +174,15 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
 // Delete a range of elements from the track
 bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
     if (!track || !track->samples) return false;
+
+    //check if the position is greater than length
     if (pos >= track->length) return false;
     size_t available = track->length - pos;
     if (len > available) len = available;
 
     size_t remain = track->length - pos - len;
+
+    //move the elemnts to the new index
     memmove(track->samples + pos, 
         track->samples + pos + len, 
         remain * sizeof(int16_t));
@@ -180,6 +194,39 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 
 // Returns a string containing <start>,<end> ad pairs in target
 char* tr_identify(struct sound_seg* target, struct sound_seg* ad){
+    if (!target || !ad || !target->samples || !ad->samples || !target->length || !ad->length) {
+        return strdup("");
+    }
+    double ref = auto_correlation(ad->samples, ad->length);
+    size_t maxMatches = target->length - ad->length;
+    size_t maxLineSize = 30;
+    char* result = (char*)malloc(maxLineSize * 16);
+    if (!result) return NULL;
+    result[0] = '\0';
+    double threshold = 0.95 * ref;
+    size_t resultPos = 0;
+    size_t matchCount = 0;
+    size_t offset = 0;
+    while (offset + ad->length <= target->length) {
+        double cc = ross_correlation(ad->samples, target->samples + offset, ad->length);
+        if (cc >= threshold) {
+            size_t start = offset;
+            size_t end = offset + ad->length;
+            int written = printf(result + resultPos, "%s%zu,%zu", matchCount ? " " : "", start, end);
+            if (written < 0 || written >= (int)maxLineSize) {
+                free(result);
+                return NULL;
+            }
+            resultPos += written;
+            matchCount++;
+
+            offset += ad->length;
+        } else {
+            offset++;
+        }
+
+        if (matchCount == 0) result[0] = '\0';
+    }
     return NULL;
 }
 
@@ -189,3 +236,18 @@ void tr_insert(struct sound_seg* src_track,
             size_t destpos, size_t srcpos, size_t len) {
     return;
 }
+
+// Return the cross-correlation of two segments
+double cross_correlation(const int16_t* a, const int16_t* b, size_t len) {
+    double corr = 0.0;
+    for (size_t i = 0; i < len; i++) {
+        corr += (double)a[i] * (double)b[i];
+    }
+    return corr;
+}
+
+// Return the auto-correlation of a segment
+double auto_correlation(const int16_t* a, size_t len) {
+    return cross_correlation(a, a, len);
+}
+
