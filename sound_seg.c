@@ -193,41 +193,101 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 }
 
 // Returns a string containing <start>,<end> ad pairs in target
-char* tr_identify(struct sound_seg* target, struct sound_seg* ad){
-    if (!target || !ad || !target->samples || !ad->samples || !target->length || !ad->length) {
-        return strdup("");
+char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
+    if (!target || !ad || !target->samples || !ad->samples || 
+        target->length == 0 || ad->length == 0 || ad->length > target->length) {
+        char* empty = (char*)malloc(1);
+        if (!empty) return NULL;
+        empty[0] = '\0';
+        return empty;
     }
+    
     double ref = auto_correlation(ad->samples, ad->length);
-    size_t maxMatches = target->length - ad->length;
-    size_t maxLineSize = 30;
-    char* result = (char*)malloc(maxLineSize * 16);
+    double threshold = 0.95 * ref;
+    
+    size_t maxMatches = target->length - ad->length + 1;
+    char* result = (char*)malloc(maxMatches * 64 + 1);
     if (!result) return NULL;
     result[0] = '\0';
-    double threshold = 0.95 * ref;
+    
     size_t resultPos = 0;
     size_t matchCount = 0;
+    
     size_t offset = 0;
     while (offset + ad->length <= target->length) {
-        double cc = ross_correlation(ad->samples, target->samples + offset, ad->length);
+        double cc = cross_correlation(target->samples + offset, ad->samples, ad->length);
+        
         if (cc >= threshold) {
             size_t start = offset;
-            size_t end = offset + ad->length;
-            int written = printf(result + resultPos, "%s%zu,%zu", matchCount ? " " : "", start, end);
-            if (written < 0 || written >= (int)maxLineSize) {
-                free(result);
-                return NULL;
+            size_t end = offset + ad->length - 1;
+            
+            if (matchCount > 0) {
+                result[resultPos++] = '\n';
             }
-            resultPos += written;
-            matchCount++;
+            
+            char startStr[21];
+            size_t startTemp = start;
+            size_t startLen = 0;
+            
+            if (startTemp == 0) {
+                startStr[0] = '0';
+                startLen = 1;
+            } else {
+                size_t i = 0;
+                while (startTemp > 0) {
+                    startStr[i++] = '0' + (startTemp % 10);
+                    startTemp /= 10;
+                }
+                startLen = i;
 
+                for (size_t j = 0; j < i/2; j++) {
+                    char temp = startStr[j];
+                    startStr[j] = startStr[i-j-1];
+                    startStr[i-j-1] = temp;
+                }
+            }
+            
+            memcpy(result + resultPos, startStr, startLen);
+            resultPos += startLen;
+            
+            result[resultPos++] = ',';
+            
+            char endStr[21];
+            size_t endTemp = end;
+            size_t endLen = 0;
+            
+            if (endTemp == 0) {
+                endStr[0] = '0';
+                endLen = 1;
+            } else {
+                size_t i = 0;
+                while (endTemp > 0) {
+                    endStr[i++] = '0' + (endTemp % 10);
+                    endTemp /= 10;
+                }
+                endLen = i;
+                
+                for (size_t j = 0; j < i/2; j++) {
+                    char temp = endStr[j];
+                    endStr[j] = endStr[i-j-1];
+                    endStr[i-j-1] = temp;
+                }
+            }
+            
+            memcpy(result + resultPos, endStr, endLen);
+            resultPos += endLen;
+            
+            result[resultPos] = '\0';
+            
+            matchCount++;
+            
             offset += ad->length;
         } else {
             offset++;
         }
-
-        if (matchCount == 0) result[0] = '\0';
     }
-    return NULL;
+    
+    return result;
 }
 
 // Insert a portion of src_track into dest_track at position destpos
