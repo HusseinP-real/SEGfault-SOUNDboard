@@ -137,14 +137,14 @@ void tr_destroy(struct sound_seg* track) {
 }
 
 // Return the length of the segment
-size_t tr_length(struct sound_seg* seg) {
+size_t tr_length(const struct sound_seg* seg) {
     if (!seg) return 0;
     return seg->length;
     //return (size_t)-1;
 }
 
 // Read len elements from position pos into dest
-void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
+void tr_read(const struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
     //check if track samples and dest is null
     if (!track || !dest) return;
     if (pos >= track->length) return;
