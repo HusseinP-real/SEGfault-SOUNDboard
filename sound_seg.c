@@ -548,7 +548,7 @@ void tr_insert(struct sound_seg* src_track,
         
         segStart = segEnd;
         prev = curr;
-        curr = (seg_node*)curr->next;
+        curr = curr->next;
 
     }
 
