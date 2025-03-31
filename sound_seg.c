@@ -137,14 +137,14 @@ void tr_destroy(struct sound_seg* track) {
 }
 
 // Return the length of the segment
-size_t tr_length(const struct sound_seg* seg) {
+size_t tr_length(struct sound_seg* seg) {
     if (!seg) return 0;
     return seg->length;
     //return (size_t)-1;
 }
 
 // Read len elements from position pos into dest
-void tr_read(const struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
+void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
     //check if track samples and dest is null
     if (!track || !dest) return;
     if (pos >= track->length) return;
@@ -413,8 +413,8 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     }
     
     //use tr_length to get the length of the target
-    size_t tlen = tr_length(target);
-    size_t alen = tr_length(ad);
+    size_t tlen = tr_length((struct sound_seg*)target);
+    size_t alen = tr_length((struct sound_seg*)ad);
 
     //if the length of ad is greater than target or empty, return empty
     if (tlen == 0 || alen == 0 || alen > tlen) {
@@ -433,8 +433,8 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
         if (empty) empty[0] = '\0';
         return empty;
     }
-    tr_read(target, target_data, 0, tlen);
-    tr_read(ad, ad_data, 0, alen);
+    tr_read((struct sound_seg*)target, target_data, 0, tlen);
+    tr_read((struct sound_seg*)ad, ad_data, 0, alen);
     
     //calculate the auto correlation
     double reference = auto_correlation(ad_data, alen);
