@@ -590,13 +590,13 @@ void tr_insert(struct sound_seg* src_track,
             dest_track->head = shared_node;
         } else if (!curr) {
             if (prev) {
-                prev->next = (sound_seg*)shared_node;
+                prev->next = shared_node;
             } else {
                 dest_track->head = shared_node;
             }
         } else {
             shared_node->next = curr->next;
-            curr->next = (sound_seg*)shared_node;
+            curr->next = shared_node;
         
         }
 
