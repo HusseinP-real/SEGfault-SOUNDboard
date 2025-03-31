@@ -548,7 +548,7 @@ void tr_insert(struct sound_seg* src_track,
         
         segStart = segEnd;
         prev = curr;
-        curr = (seg_node*)curr->next;
+        curr = curr->next;
 
     }
 
@@ -572,7 +572,7 @@ void tr_insert(struct sound_seg* src_track,
             //the first half data is curr
             curr->length = offsetInNode;
 
-            curr->next = (sound_seg*)tail_node;
+            curr->next = tail_node;
         }
 
         //creat shared node
