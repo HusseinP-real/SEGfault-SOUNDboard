@@ -12,7 +12,7 @@ typedef struct seg_node {
     size_t length; // length of the array
     bool shared; // if the array is shared node
     struct sound_seg* parent; // if the data is shared, point to the track
-    struct sound_node* next; // if the data is shared, point to the next track
+    struct seg_node* next; // if the data is shared, point to the next track
     size_t parent_offset;
 } seg_node;
 
@@ -548,7 +548,7 @@ void tr_insert(struct sound_seg* src_track,
         
         segStart = segEnd;
         prev = curr;
-        curr = curr->next;
+        curr = (seg_node*)curr->next;
 
     }
 
