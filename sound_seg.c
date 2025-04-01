@@ -185,14 +185,51 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 
             //check if the data is shared
             if (curr->shared && curr->parent) {
-                int16_t* temp_buf = malloc(toRead * sizeof(int16_t));
-                if (!temp_buf) {
-                    //alloca failed
-                    memset(dest + totalRead, 0, toRead * sizeof(int16_t));
+
+                if (curr->parent == track) {
+                    int16_t* temp_buf = malloc(toRead * sizeof(int16_t));
+                    if (!temp_buf) {
+                        memset(dest + totalRead, 0, toRead * sizeof(int16_t));
+                    } else {
+                        size_t src_pos = curr->parent_offset + offsetInNode;
+                        size_t src_read = 0;
+                        size_t src_segStart = 0;
+                        seg_node* src_curr = track->head;
+                        
+                        while (src_curr && src_segStart + src_curr->length <= src_pos) {
+                            src_segStart += src_curr->length;
+                            src_curr = src_curr->next;
+                        }
+                        
+                        if (src_curr) {
+                            size_t src_offsetInNode = src_pos - src_segStart;
+
+                            if (src_curr->shared && src_curr->parent && src_curr != curr) {
+                                tr_read(src_curr->parent, temp_buf, 
+                                       src_curr->parent_offset + src_offsetInNode, toRead);
+                            } else if (!src_curr->shared && src_curr->samples) {
+                                memcpy(temp_buf, src_curr->samples + src_offsetInNode, 
+                                       toRead * sizeof(int16_t));
+                            } else {
+                                memset(temp_buf, 0, toRead * sizeof(int16_t));
+                            }
+                        } else {
+                            memset(temp_buf, 0, toRead * sizeof(int16_t));
+                        }
+                        
+                        memcpy(dest + totalRead, temp_buf, toRead * sizeof(int16_t));
+                        free(temp_buf);
+                    }
                 } else {
-                    tr_read(curr->parent, temp_buf, curr->parent_offset + offsetInNode, toRead);
-                    memcpy(dest + totalRead, temp_buf, toRead * sizeof(int16_t));
-                    free(temp_buf);
+                    //not itself
+                    int16_t* temp_buf = malloc(toRead * sizeof(int16_t));
+                    if (!temp_buf) {
+                        memset(dest + totalRead, 0, toRead * sizeof(int16_t));
+                    } else {
+                        tr_read(curr->parent, temp_buf, curr->parent_offset + offsetInNode, toRead);
+                        memcpy(dest + totalRead, temp_buf, toRead * sizeof(int16_t));
+                        free(temp_buf);
+                    }
                 }
             } else {
                 //not shared node read
