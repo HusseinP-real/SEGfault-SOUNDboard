@@ -143,182 +143,110 @@ size_t tr_length(struct sound_seg* seg) {
     //return (size_t)-1;
 }
 
-// Read len elements from position pos into dest (e in pos-> pos + len copy)
 void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
-    //check if track samples and dest is null
+    // 边界检查
     if (!track || !dest) return;
     if (pos >= track->length) return;
-
-    //elements in len can be read
+    
+    // 可读取的最大长度
     size_t can_read = track->length - pos;
-
-    //if len > can_read let it be can_read
     if (len > can_read) len = can_read;
-
-    //count the number have read and position
-    size_t totalRead = 0;
-    size_t segStart = 0; //start of each node(segment)
-
-    //iterate node of the linked list
-    seg_node* curr = track->head;
-    while(curr && totalRead < len) {
-        size_t segEnd = segStart + curr->length;
-        
-        //find what node pos in if not jump to the next node
-        if (pos < segEnd) {
-            size_t offsetInNode;
-            if (pos > segStart) {
-                offsetInNode = pos - segStart;
-            } else {
-                offsetInNode = 0;
-            }
-
-            size_t available = curr->length - offsetInNode; //see how much left can be read in node from offset
-            size_t toRead;
-
-            //see if available is enough if not jump to the next node to read left
-            if (len - totalRead < available) {
-                toRead = len - totalRead;
-            } else {
-                toRead = available;
-            }
-
-            //check if the data is shared
-            if (curr->shared && curr->parent) {
-                // 直接从源节点读取数据，不使用递归
-                size_t source_pos = curr->parent_offset + offsetInNode;
-                
-                // 创建临时缓冲区
-                int16_t* temp = malloc(toRead * sizeof(int16_t));
-                if (!temp) {
-                    // 内存分配失败
-                    memset(dest + totalRead, 0, toRead * sizeof(int16_t));
-                } else {
-                    // 遍历父轨道的节点找到源数据
-                    seg_node* src_node = curr->parent->head;
-                    size_t src_start = 0;
-                    int found = 0;
-                    
-                    while (src_node) {
-                        size_t src_end = src_start + src_node->length;
-                        if (source_pos < src_end) {
-                            // 找到源节点
-                            size_t src_offset = source_pos - src_start;
-                            if (src_offset + toRead > src_node->length) {
-                                // 数据跨越多个节点
-                                size_t first_part = src_node->length - src_offset;
-                                
-                                if (src_node->shared && src_node->parent) {
-                                    // 如果源节点是共享的，单独处理
-                                    if (src_node == curr && src_node->parent == track) {
-                                        // 自引用情况
-                                        memset(temp, 0, toRead * sizeof(int16_t));
-                                    } else {
-                                        // 创建子缓冲区以避免递归
-                                        int16_t* sub_buf = malloc(first_part * sizeof(int16_t));
-                                        if (sub_buf) {
-                                            // 手动复制源轨道中的共享数据
-                                            size_t src_parent_pos = src_node->parent_offset + src_offset;
-                                            memset(sub_buf, 0, first_part * sizeof(int16_t));
-                                            
-                                            // 遍历父轨道的节点找到源数据
-                                            seg_node* grandparent_node = src_node->parent->head;
-                                            size_t gp_start = 0;
-                                            
-                                            while (grandparent_node) {
-                                                size_t gp_end = gp_start + grandparent_node->length;
-                                                if (src_parent_pos < gp_end) {
-                                                    size_t gp_offset = src_parent_pos - gp_start;
-                                                    size_t gp_read = (first_part <= grandparent_node->length - gp_offset) ? 
-                                                                    first_part : (grandparent_node->length - gp_offset);
-                                                    
-                                                    if (grandparent_node->samples) {
-                                                        memcpy(sub_buf, grandparent_node->samples + gp_offset, 
-                                                              gp_read * sizeof(int16_t));
-                                                    }
-                                                    break;
-                                                }
-                                                gp_start += grandparent_node->length;
-                                                grandparent_node = grandparent_node->next;
-                                            }
-                                            
-                                            memcpy(temp, sub_buf, first_part * sizeof(int16_t));
-                                            free(sub_buf);
-                                        }
-                                    }
-                                } else if (src_node->samples) {
-                                    // 简单情况：源节点有数据
-                                    memcpy(temp, src_node->samples + src_offset, first_part * sizeof(int16_t));
-                                } else {
-                                    memset(temp, 0, first_part * sizeof(int16_t));
-                                }
-                                
-                                // 处理第二部分数据（跨节点）
-                                size_t second_part = toRead - first_part;
-                                if (second_part > 0) {
-                                    src_node = src_node->next;
-                                    src_start = src_end;
-                                    
-                                    if (src_node && src_node->samples) {
-                                        memcpy(temp + first_part, src_node->samples, second_part * sizeof(int16_t));
-                                    } else {
-                                        memset(temp + first_part, 0, second_part * sizeof(int16_t));
-                                    }
-                                }
-                            } else {
-                                // 数据在单个节点内
-                                if (src_node->shared && src_node->parent) {
-                                    // 如果源节点是共享的
-                                    if (src_node == curr && src_node->parent == track) {
-                                        // 自引用情况
-                                        memset(temp, 0, toRead * sizeof(int16_t));
-                                    } else if (src_node->samples) {
-                                        // 非自引用且有数据
-                                        memcpy(temp, src_node->samples + src_offset, toRead * sizeof(int16_t));
-                                    } else {
-                                        // 非自引用但没有数据
-                                        memset(temp, 0, toRead * sizeof(int16_t));
-                                    }
-                                } else if (src_node->samples) {
-                                    // 简单情况：源节点有数据
-                                    memcpy(temp, src_node->samples + src_offset, toRead * sizeof(int16_t));
-                                } else {
-                                    memset(temp, 0, toRead * sizeof(int16_t));
-                                }
-                            }
-                            found = 1;
-                            break;
-                        }
-                        src_start = src_end;
-                        src_node = src_node->next;
-                    }
-                    
-                    if (!found) {
-                        // 找不到源数据
-                        memset(temp, 0, toRead * sizeof(int16_t));
-                    }
-                    
-                    // 复制数据到目标
-                    memcpy(dest + totalRead, temp, toRead * sizeof(int16_t));
-                    free(temp);
-                }
-            } else if (curr->samples) {
-                // 非共享节点，直接读取
-                memcpy(dest + totalRead, curr->samples + offsetInNode, toRead * sizeof(int16_t));
-            } else {
-                // 没有样本数据的情况
-                memset(dest + totalRead, 0, toRead * sizeof(int16_t));
-            }
-
-            //update the position and read count
-            totalRead += toRead;
-            pos += toRead;
-        }
-        segStart = segEnd;
-        curr = curr->next;
+    
+    // 创建一个临时缓冲区来存储整个轨道的数据
+    int16_t* buffer = malloc(track->length * sizeof(int16_t));
+    if (!buffer) {
+        // 内存分配失败，返回零
+        memset(dest, 0, len * sizeof(int16_t));
+        return;
     }
-
-    return;
+    
+    // 首先从非共享节点获取数据
+    size_t offset = 0;
+    seg_node* node = track->head;
+    
+    // 第一遍：复制所有非共享节点的数据
+    while (node) {
+        if (!node->shared && node->samples) {
+            memcpy(buffer + offset, node->samples, node->length * sizeof(int16_t));
+        }
+        offset += node->length;
+        node = node->next;
+    }
+    
+    // 第二遍：处理共享节点
+    offset = 0;
+    node = track->head;
+    
+    while (node) {
+        if (node->shared && node->parent) {
+            // 对于共享节点，读取父轨道中的数据
+            size_t parent_offset = node->parent_offset;
+            size_t parent_len = node->length;
+            
+            // 创建临时缓冲区来存储父轨道的这部分数据
+            int16_t* parent_buffer = malloc(parent_len * sizeof(int16_t));
+            if (parent_buffer) {
+                // 从父轨道读取数据（手动迭代）
+                size_t p_offset = 0;
+                seg_node* p_node = node->parent->head;
+                
+                while (p_node && p_offset + p_node->length <= parent_offset) {
+                    p_offset += p_node->length;
+                    p_node = p_node->next;
+                }
+                
+                // 读取父轨道中的数据
+                size_t read_offset = 0;
+                while (read_offset < parent_len && p_node) {
+                    size_t node_offset = parent_offset + read_offset - p_offset;
+                    size_t available = p_node->length - node_offset;
+                    size_t to_read = (parent_len - read_offset < available) ? 
+                                    (parent_len - read_offset) : available;
+                    
+                    if (p_node->shared && p_node->parent) {
+                        // 父节点也是共享的，使用父轨道中已有的数据
+                        size_t grandparent_offset = p_node->parent_offset + node_offset;
+                        
+                        // 手动从祖父轨道读取
+                        size_t gp_offset = 0;
+                        seg_node* gp_node = p_node->parent->head;
+                        
+                        while (gp_node && gp_offset + gp_node->length <= grandparent_offset) {
+                            gp_offset += gp_node->length;
+                            gp_node = gp_node->next;
+                        }
+                        
+                        if (gp_node) {
+                            size_t gp_node_offset = grandparent_offset - gp_offset;
+                            if (gp_node->samples) {
+                                memcpy(parent_buffer + read_offset, 
+                                      gp_node->samples + gp_node_offset, 
+                                      to_read * sizeof(int16_t));
+                            }
+                        }
+                    } else if (p_node->samples) {
+                        // 父节点不是共享的，直接复制数据
+                        memcpy(parent_buffer + read_offset, p_node->samples + node_offset, 
+                               to_read * sizeof(int16_t));
+                    }
+                    
+                    read_offset += to_read;
+                    p_offset += p_node->length;
+                    p_node = p_node->next;
+                }
+                
+                // 将父轨道的数据复制到主缓冲区
+                memcpy(buffer + offset, parent_buffer, parent_len * sizeof(int16_t));
+                free(parent_buffer);
+            }
+        }
+        offset += node->length;
+        node = node->next;
+    }
+    
+    // 从主缓冲区复制所需数据到目标
+    memcpy(dest, buffer + pos, len * sizeof(int16_t));
+    free(buffer);
 }
 
 void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
