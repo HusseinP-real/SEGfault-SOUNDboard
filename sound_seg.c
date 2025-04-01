@@ -5,6 +5,7 @@
 #include <string.h>
 #include <stdio.h>
 
+#define MAX_SHARED_DEPTH 20
 
 typedef struct seg_node {
     //TODO
@@ -23,6 +24,8 @@ typedef struct sound_seg {
 
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len);
 double auto_correlation(const int16_t* a, size_t len);
+static void read_samples(sound_seg* track, size_t pos, int16_t* out, size_t len, int depth);
+
 
 // Load a WAV file into buffer
 void wav_load(const char* filename, int16_t* dest){
@@ -143,227 +146,186 @@ size_t tr_length(struct sound_seg* seg) {
     //return (size_t)-1;
 }
 
-// Read len elements from position pos into dest (e in pos-> pos + len copy)
-void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
-    //check if track samples and dest is null
-    if (!track || !dest) return;
-    if (pos >= track->length) return;
 
-    //elements in len can be read
-    size_t can_read = track->length - pos;
+static void read_samples(sound_seg* track, size_t pos, int16_t* out, size_t len, int depth) {
+    // If track is NULL, or empty, or pos >= track->length, fill everything with zero
+    if (!track || !track->head || pos >= track->length || len == 0) {
+        memset(out, 0, len * sizeof(int16_t));
+        return;
+    }
 
-    //if len > can_read let it be can_read
-    if (len > can_read) len = can_read;
+    // Clamp if pos+len goes beyond the track’s length
+    if (pos + len > track->length) {
+        size_t can_read = track->length - pos;
+        // fill the remainder with 0
+        memset(out + can_read, 0, (len - can_read) * sizeof(int16_t));
+        len = can_read;
+    }
 
-    //count the number have read and position
-    size_t totalRead = 0;
-    size_t segStart = 0; //start of each node(segment)
-
-    //iterate node of the linked list
-    seg_node* curr = track->head;
-    while(curr && totalRead < len) {
-        size_t segEnd = segStart + curr->length;
-        
-        //find what node pos in if not jump to the next node
+    // Walk through the nodes in 'track', copying only the range [pos, pos+len)
+    size_t totalRead = 0;     // how many samples we’ve copied so far
+    size_t segStart  = 0;     // start offset of the current node in track coords
+    for (seg_node* cur = track->head; cur && totalRead < len; cur = cur->next) {
+        size_t segEnd = segStart + cur->length; 
         if (pos < segEnd) {
-            size_t offsetInNode;
-            if (pos > segStart) {
-                offsetInNode = pos - segStart;
-            } else {
-                offsetInNode = 0;
-            }
-
-            size_t available = curr->length - offsetInNode; //see how much left can be read in node from offset
-            size_t toRead;
-
-            //see if available is enough if not jump to the next node to read left
-            if (len - totalRead < available) {
-                toRead = len - totalRead;
-            } else {
+            // We overlap with this node
+            size_t offsetInNode = (pos > segStart) ? (pos - segStart) : 0;
+            size_t available    = cur->length - offsetInNode;
+            size_t toRead       = len - totalRead;
+            if (toRead > available) {
                 toRead = available;
             }
 
-            //check if the data is shared
-            if (curr->shared && curr->parent) {
-                //find the node of parent
-                size_t parent_pos = 0;
-                seg_node* parent_curr = curr->parent->head;
-                
-                while (parent_curr) {
-                    if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
-                        //found node of parent and read data
-                        size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
-
-                        //check if parent node is shared(parent has parent)
-                        if (parent_curr->shared && parent_curr->parent) {
-                            
-                            sound_seg* curr_parent = parent_curr->parent;
-                            size_t curr_offset =  parent_curr->parent_offset + parent_offset;
-                            seg_node* data_node = parent_curr;
-                            size_t data_offset = parent_offset;
-
-                            //find the parent of parent
-                            int max_depth = 10;
-                            while (data_node->shared && data_node->parent && max_depth > 0) {
-                                size_t node_pos = 0;
-                                seg_node* p_node = data_node->parent->head;
-
-                                while (p_node) {
-                                    if (node_pos + p_node->length > data_node->parent_offset + data_offset) {
-                                        data_node = p_node;
-                                        data_offset = data_node->parent_offset + data_offset - node_pos;
-                                        break;
-                                    }
-
-                                    node_pos += p_node->length;
-                                    p_node = p_node->next;
-                                }
-
-                                max_depth--;
-                                if (!p_node) break;
-                            }
-
-                            //find data and read
-                            memcpy(dest + totalRead, data_node->samples + data_offset, toRead * sizeof(int16_t));
-
-                        } else {
-                            //parent node is not shared read
-                            memcpy(dest + totalRead, parent_curr->samples + parent_offset, toRead * sizeof(int16_t));
-                        }
-                        break;
-                    }
-
-                    parent_pos += parent_curr->length;
-                    parent_curr = parent_curr->next;
-                }
-
-                //if cannot find
-                if(!parent_curr) {
-                    memset(dest + totalRead, 0, toRead * sizeof(int16_t));
-                }
-            } else {
-                //not shared node read
-                memcpy(dest + totalRead, curr->samples + offsetInNode, toRead * sizeof(int16_t));
+            if (cur->shared && cur->parent && depth < MAX_SHARED_DEPTH) {
+                // The node is itself shared, so pull data from cur->parent
+                // recursively. We shift the parent's offset by cur->parent_offset
+                // plus offsetInNode.
+                size_t parentPos = cur->parent_offset + offsetInNode;
+                read_samples(cur->parent, parentPos, out + totalRead, toRead, depth + 1);
+            }
+            else if (cur->samples) {
+                // Normal direct copy from cur->samples
+                memcpy(out + totalRead, cur->samples + offsetInNode, toRead * sizeof(int16_t));
+            }
+            else {
+                // No samples array => fill with zero
+                memset(out + totalRead, 0, toRead * sizeof(int16_t));
             }
 
-            //update the the position and read
             totalRead += toRead;
             pos += toRead;
         }
         segStart = segEnd;
-        curr = curr->next;
     }
 
-    return;
+    // If we still haven't copied 'len' samples, fill the remainder with zero
+    if (totalRead < len) {
+        memset(out + totalRead, 0, (len - totalRead) * sizeof(int16_t));
+    }
 }
+
+
+// Read len elements from position pos into dest (e in pos-> pos + len copy)
+void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len)
+{
+    if (!track || !dest) return;
+    if (pos >= track->length) return; // reading from beyond the end -> read 0, done
+
+    // If pos+len is beyond track->length, clamp it
+    if (pos + len > track->length) {
+        len = track->length - pos;
+    }
+
+    // Now let the helper do all the work
+    read_samples(track, pos, dest, len, 0);
+}
+
 
 void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
     if (!track || !src || len == 0) return;
-
-    // if position is greater than track length, set pos as the end of the track
     if (pos > track->length) pos = track->length;
-    
+
     size_t totalWritten = 0;
     size_t segStart = 0;
     seg_node* curr = track->head;
-    
-    // If pos equals track->length or linked list is empty, append a new node at tail
+
+    // If pos == track->length or track is empty, we append at the tail
     if (pos == track->length || !curr) {
+        // (unchanged) append a new node with the 'len' samples
         seg_node* newNode = malloc(sizeof(seg_node));
         if (!newNode) return;
+
         newNode->samples = malloc(len * sizeof(int16_t));
         if (!newNode->samples) {
             free(newNode);
             return;
         }
         memcpy(newNode->samples, src, len * sizeof(int16_t));
-        newNode->length = len;
-        newNode->shared = false;
-        newNode->parent = NULL;
-        newNode->next = NULL;
+        newNode->length        = len;
+        newNode->shared        = false;
+        newNode->parent        = NULL;
         newNode->parent_offset = 0;
-        
+        newNode->next          = NULL;
+
+        // link it in
         if (!track->head) {
             track->head = newNode;
         } else {
-            seg_node* current = track->head;
-            while (current->next) {
-                current = current->next;
+            seg_node* p = track->head;
+            while (p->next) {
+                p = p->next;
             }
-            current->next = newNode;
+            p->next = newNode;
         }
         track->length += len;
         return;
     }
-    
-    // Iterate through the linked list to write data
+
+    // Otherwise, walk existing nodes
     while (curr && totalWritten < len) {
         size_t segEnd = segStart + curr->length;
         if (pos < segEnd) {
-            size_t offsetInNode;
-            if (pos > segStart)
-                offsetInNode = pos - segStart;
-            else
-                offsetInNode = 0;
-            
-            size_t available = curr->length - offsetInNode;
-            size_t toWrite;
-            if (len - totalWritten < available)
-                toWrite = len - totalWritten;
-            else
+            size_t offsetInNode = (pos > segStart) ? (pos - segStart) : 0;
+            size_t available    = curr->length - offsetInNode;
+            size_t toWrite      = len - totalWritten;
+            if (toWrite > available) {
                 toWrite = available;
-            
-            // MODIFIED: If current node is shared, convert it to non-shared via copy-on-write
+            }
+
+            // --- Copy-on-write fix: if the node is shared, we make a private copy first ---
             if (curr->shared && curr->parent) {
+                // allocate a buffer the size of this entire node
                 int16_t* new_buf = malloc(curr->length * sizeof(int16_t));
                 if (!new_buf) return;
-                // Read the entire shared data from parent into new_buf
-                tr_read(curr->parent, new_buf, curr->parent_offset, curr->length);
-                curr->samples = new_buf;
-                curr->shared = false;
-                curr->parent = NULL;
-                curr->parent_offset = 0;
-                // Now write into the newly allocated buffer
-                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
-            } else {
-                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
+
+                // read the node's data out of the parent (could be multi-node)
+                read_samples(curr->parent, curr->parent_offset, new_buf, curr->length, 0);
+
+                // now store it in curr
+                curr->samples        = new_buf;
+                curr->shared         = false;
+                curr->parent         = NULL;
+                curr->parent_offset  = 0;
             }
-            
+            // Now we can safely overwrite curr->samples
+            memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
+
             totalWritten += toWrite;
-            pos += toWrite;
+            pos          += toWrite;
         }
         segStart = segEnd;
         curr = curr->next;
     }
-    
-    // If there's still data remaining to write, create a new node for the remaining part
+
+    // If there's still data leftover after we exhaust the existing nodes, append a new node
     if (totalWritten < len) {
         size_t remaining = len - totalWritten;
         seg_node* new_node = malloc(sizeof(seg_node));
         if (!new_node) return;
-        
+
         new_node->samples = malloc(remaining * sizeof(int16_t));
         if (!new_node->samples) {
             free(new_node);
             return;
         }
         memcpy(new_node->samples, src + totalWritten, remaining * sizeof(int16_t));
-        new_node->length = remaining;
-        new_node->shared = false;
-        new_node->parent = NULL;
-        new_node->next = NULL;
+        new_node->length        = remaining;
+        new_node->shared        = false;
+        new_node->parent        = NULL;
         new_node->parent_offset = 0;
-        
-        seg_node* current = track->head;
-        while (current->next) {
-            current = current->next;
+        new_node->next          = NULL;
+
+        // link it to the tail
+        seg_node* p = track->head;
+        while (p->next) {
+            p = p->next;
         }
-        current->next = new_node;
+        p->next = new_node;
+
         track->length += remaining;
     }
-    
-    return;
 }
+
 
 
 
@@ -691,7 +653,7 @@ void tr_insert(struct sound_seg* src_track,
         shared_node->length = len;
         shared_node->shared = true;
         shared_node->parent = (sound_seg*)src_track;
-        shared_node->parent_offset = srcpos + ((curr) ? (destpos - segStart) : 0);;
+        shared_node->parent_offset = srcpos;
         shared_node->next = NULL;
         shared_node->samples = NULL;
 
