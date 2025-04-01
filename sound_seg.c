@@ -9,16 +9,16 @@
 typedef struct seg_node {
     //TODO
     int16_t* samples; // array(pointer) of samples
-    size_t length; // length of the array
-    bool shared; // if the array is shared node
+    size_t length;
+    bool shared; // judge if shared
     struct sound_seg* parent; // if the data is shared, point to the track
     struct seg_node* next; // if the data is shared, point to the next track
     size_t parent_offset;
 } seg_node;
 
 typedef struct sound_seg {
-    seg_node* head; // head of the linked list
-    size_t length; // length of the linked list
+    seg_node* head;
+    size_t length;
 } sound_seg;
 
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len);
@@ -100,7 +100,7 @@ void wav_save(const char* fname, int16_t* src, size_t len){
     return;
 }
 
-// Initialize a new sound_seg object
+// Initialize a new sound_seg object -> empty ll
 struct sound_seg* tr_init() {
     sound_seg* track = malloc(sizeof(struct sound_seg));
     // allocate memory failed
@@ -112,7 +112,7 @@ struct sound_seg* tr_init() {
     return track;
 }
 
-// Destroy a sound_seg object and free all allocated memory
+// Destroy a sound_seg object and free all allocated memory (except shared)
 void tr_destroy(struct sound_seg* track) {
     // if the pointer is null return
     if (!track) return;
@@ -143,28 +143,28 @@ size_t tr_length(struct sound_seg* seg) {
     //return (size_t)-1;
 }
 
-// Read len elements from position pos into dest
+// Read len elements from position pos into dest (e in pos-> pos + len copy)
 void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
     //check if track samples and dest is null
     if (!track || !dest) return;
     if (pos >= track->length) return;
 
-    //calculate the rest elements can be read
+    //elements in len can be read
     size_t can_read = track->length - pos;
 
-    //if len of sample is too big let it be the rest of the track
+    //if len > can_read let it be can_read
     if (len > can_read) len = can_read;
 
     //count the number have read and position
     size_t totalRead = 0;
-    size_t segStart = 0;
+    size_t segStart = 0; //start of each node(segment)
 
     //iterate node of the linked list
     seg_node* curr = track->head;
     while(curr && totalRead < len) {
         size_t segEnd = segStart + curr->length;
         
-        //judge if pos is in the current node
+        //find what node pos in if not jump to the next node
         if (pos < segEnd) {
             size_t offsetInNode;
             if (pos > segStart) {
@@ -173,9 +173,10 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
                 offsetInNode = 0;
             }
 
-            //calculate the length to read
-            size_t available = curr->length - offsetInNode;
+            size_t available = curr->length - offsetInNode; //see how much left can be read in node from offset
             size_t toRead;
+
+            //see if available is enough if not jump to the next node to read left
             if (len - totalRead < available) {
                 toRead = len - totalRead;
             } else {
@@ -189,11 +190,11 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
                 seg_node* parent_curr = curr->parent->head;
                 
                 while (parent_curr) {
-                    if (parent_pos + parent_curr->length > curr-> parent_offset + offsetInNode) {
+                    if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
                         //found node of parent and read data
                         size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
 
-                        //check if parent node is shared
+                        //check if parent node is shared(parent has parent)
                         if (parent_curr->shared && parent_curr->parent) {
                             
                             sound_seg* curr_parent = parent_curr->parent;
@@ -201,7 +202,7 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
                             seg_node* data_node = parent_curr;
                             size_t data_offset = parent_offset;
 
-                            //at most iterate 10 
+                            //find the parent of parent
                             int max_depth = 10;
                             while (data_node->shared && data_node->parent && max_depth > 0) {
                                 size_t node_pos = 0;
@@ -319,6 +320,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
             } else {
                 offsetInNode = 0;
             }
+
             //calculate the length to write
             size_t available = curr->length - offsetInNode;
             size_t toWrite;
@@ -364,7 +366,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         curr = curr->next;
     }
 
-    //if data is not written yet, add new node
+    //if data is not written done, add new node to store the rest
     if (totalWritten < len) {
         size_t remaining = len - totalWritten;
         seg_node* new_node = (seg_node*)malloc(sizeof(seg_node));
@@ -403,29 +405,135 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
 
 // Delete a range of elements from the track
 bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
-
+    //edge
     if (!track || !track->head || !track->head->samples) return false;
-
     if (pos >= track->length) return false;
-    
-    if (pos + len > track->length) {
-        len = track->length - pos;
+    if (pos + len > track->length) len = track->length - pos;
+
+    size_t offset = 0;
+    size_t deleted = 0;
+    seg_node* prev = NULL;
+    seg_node* node = track->head;
+
+    while (node && offset + node->length <= pos) {
+        offset += node->length;
+        prev = node;
+        node = node->next;
     }
 
-    size_t remain = track->length - pos - len;
+    while (node && deleted < len) {
+        size_t node_start;
+        if (pos > offset) {
+            node_start = pos - offset;
+        } else {
+            node_start = 0;
+        }
+        size_t remainingToDeleted = len - deleted;
+        size_t nodeDeletedLen;
+        if (node_start + remainingToDeleted <= node->length) {
+            nodeDeletedLen = remainingToDeleted;
+        } else {
+            nodeDeletedLen = node->length - node_start;
+        }
 
-    memmove(track->head->samples + pos,
-            track->head->samples + pos + len,
-            remain * sizeof(int16_t));
+        //if shared cannot deleted
+        if (node->shared) return false;
+
+        //delete hole node
+        if (node_start == 0 && nodeDeletedLen == node->length) {
+            seg_node* toDelete = node;
+            node = node->next;
+
+            if (prev) {
+                prev->next = node;
+            } else {
+                track->head = node;
+            }
+            if (toDelete->samples && !toDelete->shared) {
+                free(toDelete->samples);
+            }
+            free(toDelete);
+        }
+
+        //delete the head to somewhere
+        else if (node_start == 0) {
+            //if is not shared
+            if (!node->shared) {
+                node->samples += nodeDeletedLen;
+                node->length -= nodeDeletedLen;
+                if (node->parent) node->parent_offset += nodeDeletedLen;
+            }       
+            //if is shared node
+            else {
+                seg_node* new_node = (seg_node*)malloc(sizeof(seg_node));
+                if (!new_node) return false;
+                new_node->length -= nodeDeletedLen;
+                new_node->shared = node->shared;
+                new_node->parent = node->parent;
+                new_node->parent_offset += nodeDeletedLen;
+                new_node->next = node->next;
+                if (prev) {
+                    prev->next = new_node;
+                } else {
+                    track->head = new_node;
+                }
+                free(node);
+                node = new_node;
+            }
+        }
+        //delete somewhere to tail
+        else if (node_start + nodeDeletedLen == node->length) {
+            node->length -= nodeDeletedLen;
+            prev = node;
+            node = node->next;
+        }
+        //delete middle
+        else {
+            //creat a node to store the rest
+            seg_node* after_node = (seg_node*)malloc(sizeof(seg_node));
+            if (!after_node) return false;
+            size_t after_len = node->length - node_start - nodeDeletedLen;
+            if (!node->shared) {
+                after_node->samples = malloc(after_len * sizeof(int16_t));
+                if (!after_node->samples) {
+                    free(after_node);
+                    return false;
+                }
+                memcpy(after_node->samples, node->samples + node_start + nodeDeletedLen, after_len * sizeof(int16_t));
+                after_node->length = after_len;
+                after_node->shared = false;
+                after_node->parent = NULL;
+                after_node->parent_offset = 0;
+            } else {
+                after_node->samples = NULL;
+                after_node->length = after_len;
+                after_node->shared = true;
+                after_node->parent = node->parent;
+                after_node->parent_offset = node->parent_offset + node_start + nodeDeletedLen;
+            }
+            after_node->next = node->next;
+            node->next = after_node;
+            node->length = node_start;
+            prev = after_node;
+            node = after_node->next;
+
+        }
+
+        deleted += nodeDeletedLen;
+        offset = offset + node_start + nodeDeletedLen;
+
+        pos += nodeDeletedLen;
+
+    }
 
     track->length -= len;
-    track->head->length = track->length;
-    
+
     return true;
 }
 
 // Returns a string containing <start>,<end> ad pairs in target
 char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
+    //check if target track or ad is empty
     if (!target || !ad) {
         char* empty = (char*)malloc(1);
         if (empty) empty[0] = '\0';
@@ -446,6 +554,8 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     //use tr_read
     int16_t* target_data = malloc(tlen * sizeof(int16_t));
     int16_t* ad_data = malloc(alen * sizeof(int16_t));
+    
+    //allocate failed
     if (!target_data || !ad_data) {
         free(target_data);
         free(ad_data);
@@ -453,6 +563,7 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
         if (empty) empty[0] = '\0';
         return empty;
     }
+
     tr_read((struct sound_seg*)target, target_data, 0, tlen);
     tr_read((struct sound_seg*)ad, ad_data, 0, alen);
     
@@ -463,6 +574,8 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     // initialize the first result
     size_t initial_size = 256;
     char* result = (char*)malloc(initial_size);
+
+    //allocate failed
     if (!result) {
         free(target_data);
         free(ad_data);
@@ -476,9 +589,12 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     size_t last_matched_end = 0;
     size_t result_size = initial_size;
 
-    //iterate target_data
+    /*
+        iterate target_data
+        [                 ]
+          [  ]-> [   ]
+    */
     while (offset + alen <= tlen) {
-        //if pos is
         if (offset <= last_matched_end) {
             offset++;
             continue;
@@ -487,12 +603,13 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
         double cc = cross_correlation(target_data + offset, ad_data, alen);
         if (cc >= threshold) {
             size_t start = offset;
-            size_t end = offset + alen - 1;
+            size_t end = offset + alen - 1; //index
             last_matched_end = end;
 
             //if it is not the first match, add \n
             if (matchCount > 0) {
                 if (resultPos + 1 >= result_size) {
+                    //expend the size
                     size_t new_size = result_size * 2;
                     char* new_result = (char*)realloc(result, new_size);
                     if (!new_result) break;
@@ -503,7 +620,7 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
                 result[resultPos] = '\0';
             }
 
-            //use snprintf to convert to str
+            //convert to str
             char pair[64];
             int written = snprintf(pair, sizeof(pair), "%zu,%zu", start, end);
             if (written < 0) break;
