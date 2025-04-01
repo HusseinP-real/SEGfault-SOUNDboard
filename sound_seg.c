@@ -459,7 +459,7 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
         else if (node_start == 0) {
             //if is not shared
             if (!node->shared) {
-                node->samples += nodeDeletedLen;
+                memmove(node->samples, node->samples + nodeDeletedLen, (node->length - nodeDeletedLen) * sizeof(int16_t));
                 node->length -= nodeDeletedLen;
                 if (node->parent) node->parent_offset += nodeDeletedLen;
             }       
