@@ -332,27 +332,27 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
 
             //check if the data is shared
             if (curr->shared && curr->parent) {
-                //find the node of parent
-                size_t parent_pos = 0;
-                seg_node* parent_curr = curr->parent->head;
-                while (parent_curr) {
-                    if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
-                        //found the parent node and calculate the offset
-                        size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
-
-                        //write to the parent node
-                        memcpy(parent_curr->samples + parent_offset, src + totalWritten, toWrite * sizeof(int16_t));
-
-                        break;
+                seg_node *real_node = curr;
+                size_t real_offset = offsetInNode + curr->parent_offset;
+                while (real_node->shared && real_node->parent) {
+                    seg_node *temp = real_node->parent->head;
+                    size_t temp_pos = 0;
+                    while (temp && (temp_pos + temp->length <= real_offset)) {
+                        temp_pos += temp->length;
+                        temp = temp->next;
                     }
-
-                    parent_pos += parent_curr->length;
-                    parent_curr = parent_curr->next;
-
+                    if (!temp) break;
+                    real_offset = real_offset - temp_pos + temp->parent_offset;
+                    real_node = temp;
                 }
-                
-            } else {
-                //if the data is not shared, write to the current node
+
+                if (real_node && real_node->samples) {
+                    memcpy(real_node->samples + real_offset, src + totalWritten, toWrite * sizeof(int16_t));
+                } else {
+                    return;
+                }
+            }
+            else {
                 memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
             }
 
