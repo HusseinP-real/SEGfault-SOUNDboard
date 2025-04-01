@@ -23,6 +23,7 @@ typedef struct sound_seg {
 
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len);
 double auto_correlation(const int16_t* a, size_t len);
+void simple_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len);
 
 // Load a WAV file into buffer
 void wav_load(const char* filename, int16_t* dest){
