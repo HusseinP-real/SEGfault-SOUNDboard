@@ -347,7 +347,15 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
                 }
 
                 if (real_node && real_node->samples) {
-                    memcpy(real_node->samples + real_offset, src + totalWritten, toWrite * sizeof(int16_t));
+                    size_t safe_to_write = toWrite;
+                    if (real_offset + toWrite > real_node->length) {
+                        safe_to_write = real_node->length - real_offset;
+                    }
+                    if (safe_to_write > 0) {
+                        memcpy(real_node->samples + real_offset, src + totalWritten, safe_to_write * sizeof(int16_t));
+                    } else {
+                        return;
+                    }
                 } else {
                     return;
                 }
