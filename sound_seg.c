@@ -644,6 +644,15 @@ void tr_insert(struct sound_seg* src_track,
 
         tr_write(dest_track, temp, destpos, len);
         free(temp);
+
+        int16_t* filler = malloc(len * sizeof(int16_t));
+        if (!filler) return;
+        for (size_t i = 0; i < len; i++) {
+            filler[i] = -10;
+        }
+        tr_write(src_track, filler, srcpos, len);
+        free(filler);
+        
         return;
     }
 
