@@ -185,61 +185,14 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 
             //check if the data is shared
             if (curr->shared && curr->parent) {
-                //find the node of parent
-                size_t parent_pos = 0;
-                seg_node* parent_curr = curr->parent->head;
-                
-                while (parent_curr) {
-                    if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
-                        //found node of parent and read data
-                        size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
-
-                        //check if parent node is shared(parent has parent)
-                        if (parent_curr->shared && parent_curr->parent) {
-                            
-                            sound_seg* curr_parent = parent_curr->parent;
-                            size_t curr_offset =  parent_curr->parent_offset + parent_offset;
-                            seg_node* data_node = parent_curr;
-                            size_t data_offset = parent_offset;
-
-                            //find the parent of parent
-                            int max_depth = 10;
-                            while (data_node->shared && data_node->parent && max_depth > 0) {
-                                size_t node_pos = 0;
-                                seg_node* p_node = data_node->parent->head;
-
-                                while (p_node) {
-                                    if (node_pos + p_node->length > data_node->parent_offset + data_offset) {
-                                        data_node = p_node;
-                                        data_offset = data_node->parent_offset + data_offset - node_pos;
-                                        break;
-                                    }
-
-                                    node_pos += p_node->length;
-                                    p_node = p_node->next;
-                                }
-
-                                max_depth--;
-                                if (!p_node) break;
-                            }
-
-                            //find data and read
-                            memcpy(dest + totalRead, data_node->samples + data_offset, toRead * sizeof(int16_t));
-
-                        } else {
-                            //parent node is not shared read
-                            memcpy(dest + totalRead, parent_curr->samples + parent_offset, toRead * sizeof(int16_t));
-                        }
-                        break;
-                    }
-
-                    parent_pos += parent_curr->length;
-                    parent_curr = parent_curr->next;
-                }
-
-                //if cannot find
-                if(!parent_curr) {
+                int16_t* temp_buf = malloc(toRead * sizeof(int16_t));
+                if (!temp_buf) {
+                    //alloca failed
                     memset(dest + totalRead, 0, toRead * sizeof(int16_t));
+                } else {
+                    tr_read(curr->parent, temp_buf, curr->parent_offset + offsetInNode, toRead);
+                    memcpy(dest + totalRead, temp_buf, toRead * sizeof(int16_t));
+                    free(temp_buf);
                 }
             } else {
                 //not shared node read
