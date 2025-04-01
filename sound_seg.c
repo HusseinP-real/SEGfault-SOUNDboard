@@ -729,31 +729,30 @@ void tr_insert(struct sound_seg* src_track,
             curr->next = tail_node;
         }
 
-        //creat shared node
         seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
         if (!shared_node) return;
         shared_node->length = len;
         shared_node->shared = true;
         shared_node->parent = (sound_seg*)src_track;
         shared_node->parent_offset = srcpos;
-        shared_node->next = NULL;
         shared_node->samples = NULL;
+ 
 
-        //insert the shared node
         if (!dest_track->head) {
+            shared_node->next = NULL;
             dest_track->head = shared_node;
-        } else if (!curr) {
-            if (prev) {
-                prev->next = shared_node;
-            } else {
-                dest_track->head = shared_node;
-            }
-        } else {
-            shared_node->next = curr->next;
-            curr->next = shared_node;
-        
         }
 
+        else if (curr == dest_track->head && destpos == 0) {
+            shared_node->next = dest_track->head;
+            dest_track->head = shared_node;
+        }
+
+        else {
+            shared_node->next = curr;
+            if (prev) prev->next = shared_node;
+        }
+ 
         dest_track->length += len;
 
     }
