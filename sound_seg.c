@@ -358,7 +358,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
                 }
 
                 if (!found) {
-                    
+
                 }
                 
             } else {
@@ -433,6 +433,18 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
     }
 
     while (node && deleted < len) {
+
+        if (node->shared && node->parent) {
+            int16_t* new_buf = malloc(node->length * sizeof(int16_t));
+            if (!new_buf) return false;
+            tr_read(node->parent, new_buf, node->parent_offset, node->length);
+            node->samples = new_buf;
+            node->shared = false;
+            node->parent = NULL;
+            node->parent_offset = 0;
+        }
+
+        
         size_t node_start;
         if (pos > offset) {
             node_start = pos - offset;
