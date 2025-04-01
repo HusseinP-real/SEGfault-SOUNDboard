@@ -333,23 +333,35 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
             //check if the data is shared
             if (curr->shared && curr->parent) {
                 //find the node of parent
-                size_t parent_pos = 0;
-                seg_node* parent_curr = curr->parent->head;
-                while (parent_curr) {
-                    if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
-                        //found the parent node and calculate the offset
-                        size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
 
-                        //write to the parent node
-                        memcpy(parent_curr->samples + parent_offset, src + totalWritten, toWrite * sizeof(int16_t));
+                // size_t parent_pos = 0;
+                // seg_node* parent_curr = curr->parent->head;
+                // while (parent_curr) {
+                //     if (parent_pos + parent_curr->length > curr->parent_offset + offsetInNode) {
+                //         //found the parent node and calculate the offset
+                //         size_t parent_offset = curr->parent_offset + offsetInNode - parent_pos;
 
-                        break;
-                    }
+                //         //write to the parent node
+                //         memcpy(parent_curr->samples + parent_offset, src + totalWritten, toWrite * sizeof(int16_t));
 
-                    parent_pos += parent_curr->length;
-                    parent_curr = parent_curr->next;
+                //         break;
+                //     }
 
-                }
+                //     parent_pos += parent_curr->length;
+                //     parent_curr = parent_curr->next;
+
+                // }
+
+                int16_t* new_buf = malloc(curr->length * sizeof(int16_t));
+                if (!new_buf) return;
+                tr_read(curr->parent, new_buf, curr->parent_offset, curr->length);
+
+                curr->samples = new_buf;
+                curr->shared = false;
+                curr->parent = NULL;
+                curr->parent_offset = 0;
+
+                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
                 
             } else {
                 //if the data is not shared, write to the current node
