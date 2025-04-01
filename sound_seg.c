@@ -690,7 +690,7 @@ void tr_insert(struct sound_seg* src_track,
         shared_node->length = len;
         shared_node->shared = true;
         shared_node->parent = (sound_seg*)src_track;
-        shared_node->parent_offset = srcpos;
+        shared_node->parent_offset = srcpos + ((curr) ? (destpos - segStart) : 0);;
         shared_node->next = NULL;
         shared_node->samples = NULL;
 
