@@ -613,23 +613,19 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
 
 // Insert a portion of src_track into dest_track at position destpos
 void tr_insert(struct sound_seg* src_track,
-        struct sound_seg* dest_track,
-        size_t destpos, size_t srcpos, size_t len) {
-    // 检查边界条件
+    struct sound_seg* dest_track,
+    size_t destpos, size_t srcpos, size_t len) {
     if (!src_track || !dest_track || len == 0) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     if (srcpos >= src_track->length) return;
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
     if (len == 0) return;
 
-    // 为要插入的数据创建一个缓冲区，无论是否自插入
     int16_t* data_to_insert = malloc(len * sizeof(int16_t));
     if (!data_to_insert) return;
 
-    // 读取要插入的数据
     tr_read(src_track, data_to_insert, srcpos, len);
 
-    // 查找插入位置
     seg_node* curr = dest_track->head;
     seg_node* prev = NULL;
     size_t segStart = 0;
@@ -640,11 +636,9 @@ void tr_insert(struct sound_seg* src_track,
         curr = curr->next;
     }
 
-    // 如果需要在一个节点中间插入，拆分该节点
     if (curr && destpos > segStart) {
         size_t offsetInNode = destpos - segStart;
 
-        // 创建一个新节点用于存储后半部分
         seg_node* tail_node = malloc(sizeof(seg_node));
         if (!tail_node) {
             free(data_to_insert);
@@ -652,13 +646,11 @@ void tr_insert(struct sound_seg* src_track,
         }
 
         if (curr->shared) {
-            // 对于共享节点，保持共享状态
             tail_node->samples = NULL;
             tail_node->shared = true;
             tail_node->parent = curr->parent;
             tail_node->parent_offset = curr->parent_offset + offsetInNode;
         } else {
-            // 对于非共享节点，复制数据
             tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
             if (!tail_node->samples) {
                 free(tail_node);
@@ -674,41 +666,35 @@ void tr_insert(struct sound_seg* src_track,
         tail_node->length = curr->length - offsetInNode;
         tail_node->next = curr->next;
 
-        // 更新当前节点为前半部分
         curr->length = offsetInNode;
         curr->next = tail_node;
 
-        // 更新指针，以便插入新节点
         prev = curr;
         curr = tail_node;
     }
 
-    // 创建新节点来存储要插入的数据
     seg_node* insert_node = malloc(sizeof(seg_node));
     if (!insert_node) {
         free(data_to_insert);
         return;
     }
 
-    // 无论是否自插入，都直接使用复制的数据，避免共享
     insert_node->samples = data_to_insert;
     insert_node->length = len;
     insert_node->shared = false;
     insert_node->parent = NULL;
     insert_node->parent_offset = 0;
 
-    // 插入新节点
+    insert_node->next = curr;
     if (prev) {
-        insert_node->next = prev->next;
         prev->next = insert_node;
     } else {
-        insert_node->next = dest_track->head;
         dest_track->head = insert_node;
     }
 
-    // 更新目标轨道长度
     dest_track->length += len;
 }
+
 
 // get target and correlation with ad
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len) {
