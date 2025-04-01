@@ -281,6 +281,8 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
             return;
         }
 
+        memcpy(newNode->samples, src, len * sizeof(int16_t));
+
         //initialize new node
         newNode->length = len;
         newNode->shared = false;
@@ -289,7 +291,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         newNode->parent_offset = 0;
 
         //copy data to new node
-        memcpy(newNode->samples, src, len * sizeof(int16_t));
+        //memcpy(newNode->samples, src, len * sizeof(int16_t));
 
         //add new node to the end of the linked list
         if (!track->head) {
