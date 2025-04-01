@@ -430,10 +430,10 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
             else {
                 seg_node* new_node = (seg_node*)malloc(sizeof(seg_node));
                 if (!new_node) return false;
-                new_node->length -= nodeDeletedLen;
+                new_node->length = node->length - nodeDeletedLen;
                 new_node->shared = node->shared;
                 new_node->parent = node->parent;
-                new_node->parent_offset += nodeDeletedLen;
+                new_node->parent_offset = node->parent_offset + nodeDeletedLen;
                 new_node->next = node->next;
                 if (prev) {
                     prev->next = new_node;
