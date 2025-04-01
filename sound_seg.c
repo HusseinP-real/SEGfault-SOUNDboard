@@ -259,7 +259,6 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 
 void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
     if (!track || !src || len == 0) return;
-
     if (pos > track->length) pos = track->length;
 
     size_t totalWritten = 0;
@@ -267,7 +266,6 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
     seg_node* curr = track->head;
     seg_node* prev = NULL;
 
-    // Traverse and write to existing segments
     while (curr && totalWritten < len) {
         size_t segEnd = segStart + curr->length;
 
@@ -297,12 +295,12 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         curr = curr->next;
     }
 
-    // If data is remaining, append it as a new node
-    if (totalWritten < len) {
+    // Add remaining data as new node(s)
+    while (totalWritten < len) {
         size_t remaining = len - totalWritten;
+
         seg_node* new_node = malloc(sizeof(seg_node));
         if (!new_node) return;
-
         new_node->samples = malloc(remaining * sizeof(int16_t));
         if (!new_node->samples) {
             free(new_node);
@@ -316,69 +314,40 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         new_node->parent_offset = 0;
         new_node->next = NULL;
 
-        if (!prev) {
-            track->head = new_node;
-        } else {
+        if (prev) {
             prev->next = new_node;
+        } else {
+            track->head = new_node;
         }
 
-        track->length = pos + remaining;
-        return;
+        prev = new_node;
+        totalWritten += remaining;
+        track->length = pos + len; // update length if new segment added
     }
 
-    // Clean up tail nodes after writing
-    size_t written_end = pos;
-    curr = track->head;
-    prev = NULL;
-    segStart = 0;
-
-    while (curr && segStart + curr->length <= written_end) {
-        segStart += curr->length;
-        prev = curr;
-        curr = curr->next;
-    }
-
-    if (curr && written_end > segStart) {
-        size_t keep_len = written_end - segStart;
-        if (curr->shared && curr->parent) {
-            int16_t* new_buf = malloc(curr->length * sizeof(int16_t));
-            if (!new_buf) return;
-            tr_read(curr->parent, new_buf, curr->parent_offset, curr->length);
-            curr->samples = new_buf;
-            curr->shared = false;
-            curr->parent = NULL;
-            curr->parent_offset = 0;
+    // Clean up any remaining nodes after writing
+    if (curr) {
+        if (prev) {
+            prev->next = NULL;
+        } else {
+            track->head = NULL;
         }
 
-        curr->length = keep_len;
-        seg_node* temp = curr->next;
-        curr->next = NULL;
-
-        while (temp) {
-            seg_node* next = temp->next;
-            if (temp->samples && !temp->shared) {
-                free(temp->samples);
+        while (curr) {
+            seg_node* next = curr->next;
+            if (curr->samples && !curr->shared) {
+                free(curr->samples);
             }
-            free(temp);
-            temp = next;
+            free(curr);
+            curr = next;
         }
 
-    } else if (prev) {
-        seg_node* temp = prev->next;
-        prev->next = NULL;
-
-        while (temp) {
-            seg_node* next = temp->next;
-            if (temp->samples && !temp->shared) {
-                free(temp->samples);
-            }
-            free(temp);
-            temp = next;
-        }
+        track->length = pos + len;
+    } else if (track->length < pos + len) {
+        track->length = pos + len;
     }
-
-    track->length = pos + len;
 }
+
 
 
 
