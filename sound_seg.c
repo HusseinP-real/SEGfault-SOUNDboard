@@ -24,6 +24,7 @@ typedef struct sound_seg {
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len);
 double auto_correlation(const int16_t* a, size_t len);
 
+
 // Load a WAV file into buffer
 void wav_load(const char* filename, int16_t* dest){
     // fopen file, read
@@ -621,6 +622,15 @@ void tr_insert(struct sound_seg* src_track,
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
     if (len == 0) return;
 
+    bool is_self_insert = (src_track == dest_track);
+
+    int16_t* self_data = NULL;
+    if (is_self_insert) {
+        self_data = malloc(len * sizeof(int16_t));
+        if (!self_data) return;
+        tr_read(src_track, self_data, srcpos, len);
+    }
+
     seg_node* curr = dest_track->head; //iterate
     seg_node* prev = NULL;
     size_t segStart = 0;
@@ -643,7 +653,10 @@ void tr_insert(struct sound_seg* src_track,
         if (offsetInNode > 0 && offsetInNode < curr->length) {
             //let the second part in the tail node
             seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
-            if (!tail_node) return;
+            if (!tail_node) {
+                free(self_data);
+                return;
+            }
 
             tail_node->length = curr->length - offsetInNode;
             tail_node->shared = curr->shared;
@@ -655,6 +668,7 @@ void tr_insert(struct sound_seg* src_track,
                 tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
                 if (!tail_node->samples) {
                     free(tail_node);
+                    free(self_data);
                     return;
                 }
                 memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
@@ -670,13 +684,27 @@ void tr_insert(struct sound_seg* src_track,
 
         //creat shared node
         seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
-        if (!shared_node) return;
+        if (!shared_node) {
+            free(self_data);
+            return;
+        }
+
         shared_node->length = len;
-        shared_node->shared = true;
-        shared_node->parent = (sound_seg*)src_track;
-        shared_node->parent_offset = srcpos;
-        shared_node->next = NULL;
-        shared_node->samples = NULL;
+        shared_node->next = curr->next;
+
+        if(is_self_insert) {
+            shared_node->shared = false;
+            shared_node->parent = NULL;
+            shared_node->parent_offset = 0;
+            shared_node->samples = self_data;
+        } else {
+            shared_node->shared = true;
+            shared_node->parent = (sound_seg*)src_track;
+            shared_node->parent_offset = srcpos;
+            shared_node->samples = NULL;
+            free(self_data);
+        }
+        
 
         //insert the shared node
         if (!dest_track->head) {
@@ -688,7 +716,8 @@ void tr_insert(struct sound_seg* src_track,
                 dest_track->head = shared_node;
             }
         } else {
-            shared_node->next = curr->next;
+            // shared_node->next = curr->next;
+            // curr->next = shared_node;
             curr->next = shared_node;
         
         }
