@@ -671,93 +671,58 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
 
 }
 
-// Insert a portion of src_track into dest_track at position destpos
 void tr_insert(struct sound_seg* src_track,
-            struct sound_seg* dest_track,
-            size_t destpos, size_t srcpos, size_t len) {
-    //check egde
+    struct sound_seg* dest_track,
+    size_t destpos, size_t srcpos, size_t len) {
+
     if (!src_track || !dest_track || len == 0) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     if (srcpos >= src_track->length) return;
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
-    if (len == 0) return;
 
-    seg_node* curr = dest_track->head; //iterate
-    seg_node* prev = NULL;
-    size_t segStart = 0;
+    size_t offset = 0;
+    seg_node *curr = dest_track->head, *prev = NULL;
 
-    //iterate nodes of ll until find the pos
-    while (curr) {
-        size_t segEnd = segStart + curr->length;
-        if (destpos < segEnd) break;
-        
-        segStart = segEnd;
+    while (curr && offset + curr->length <= destpos) {
+        offset += curr->length;
         prev = curr;
         curr = curr->next;
-
     }
 
-    if (curr) {
-        size_t offsetInNode = destpos - segStart;
+    size_t node_offset = destpos - offset;
 
-        //judge if it is in middle
-        if (offsetInNode > 0 && offsetInNode < curr->length) {
-            //let the second part in the tail node
-            seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
-            if (!tail_node) return;
+    if (curr && node_offset > 0 && node_offset < curr->length) {
+        seg_node* new_node = malloc(sizeof(seg_node));
+        new_node->length = curr->length - node_offset;
+        new_node->samples = curr->samples ? malloc(new_node->length * sizeof(int16_t)) : NULL;
+        if (new_node->samples) memcpy(new_node->samples, curr->samples + node_offset, new_node->length * sizeof(int16_t));
+        new_node->shared = curr->shared;
+        new_node->parent = curr->parent;
+        new_node->parent_offset = curr->parent_offset + node_offset;
+        new_node->next = curr->next;
 
-            tail_node->length = curr->length - offsetInNode;
-            tail_node->shared = curr->shared;
-            tail_node->parent = curr->parent;
-            tail_node->parent_offset = curr->parent_offset + offsetInNode;
-            tail_node->next = curr->next;
-
-            if (curr->samples) {
-                tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
-                if (!tail_node->samples) {
-                    free(tail_node);
-                    return;
-                }
-                memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
-            } else {
-                tail_node->samples = NULL;
-            }
-
-            //the first half data is curr
-            curr->length = offsetInNode;
-
-            curr->next = tail_node;
-        }
-
-        seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
-        if (!shared_node) return;
-        shared_node->length = len;
-        shared_node->shared = true;
-        shared_node->parent = (sound_seg*)src_track;
-        shared_node->parent_offset = srcpos;
-        shared_node->samples = NULL;
- 
-
-        if (!dest_track->head) {
-            shared_node->next = NULL;
-            dest_track->head = shared_node;
-        }
-
-        else if (curr == dest_track->head && destpos == 0) {
-            shared_node->next = dest_track->head;
-            dest_track->head = shared_node;
-        }
-
-        else {
-            shared_node->next = curr;
-            if (prev) prev->next = shared_node;
-        }
- 
-        dest_track->length += len;
-
+        curr->length = node_offset;
+        curr->next = new_node;
+        prev = curr;
+        curr = new_node;
     }
 
-    return;
+    seg_node* shared_node = malloc(sizeof(seg_node));
+    shared_node->length = len;
+    shared_node->shared = true;
+    shared_node->parent = src_track;
+    shared_node->parent_offset = srcpos;
+    shared_node->samples = NULL;
+
+    if (prev) {
+        shared_node->next = prev->next;
+        prev->next = shared_node;
+    } else {
+        shared_node->next = dest_track->head;
+        dest_track->head = shared_node;
+    }
+
+    dest_track->length += len;
 }
 
 // get target and correlation with ad
