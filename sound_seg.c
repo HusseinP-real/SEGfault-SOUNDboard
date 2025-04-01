@@ -313,21 +313,11 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
             else
                 toWrite = available;
             
-            // MODIFIED: If current node is shared, convert it to non-shared via copy-on-write
-            if (curr->shared && curr->parent) {
-                int16_t* new_buf = malloc(curr->length * sizeof(int16_t));
-                if (!new_buf) return;
-                // Read the entire shared data from parent into new_buf
-                tr_read(curr->parent, new_buf, curr->parent_offset, curr->length);
-                curr->samples = new_buf;
-                curr->shared = false;
-                curr->parent = NULL;
-                curr->parent_offset = 0;
-                // Now write into the newly allocated buffer
-                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
-            } else {
-                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
-            }
+                if (curr->shared && curr->parent) {
+                    tr_write(curr->parent, src + totalWritten, curr->parent_offset + offsetInNode, toWrite);
+                } else {
+                    memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
+                }
             
             totalWritten += toWrite;
             pos += toWrite;
@@ -748,3 +738,4 @@ double cross_correlation(const int16_t* a, const int16_t* b, size_t len) {
 double auto_correlation(const int16_t* a, size_t len) {
     return cross_correlation(a, a, len);
 }
+
