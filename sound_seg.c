@@ -613,120 +613,101 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
 
 // Insert a portion of src_track into dest_track at position destpos
 void tr_insert(struct sound_seg* src_track,
-            struct sound_seg* dest_track,
-            size_t destpos, size_t srcpos, size_t len) {
-    //check egde
+        struct sound_seg* dest_track,
+        size_t destpos, size_t srcpos, size_t len) {
+    // 检查边界条件
     if (!src_track || !dest_track || len == 0) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     if (srcpos >= src_track->length) return;
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
     if (len == 0) return;
 
-    bool is_self_insert = (src_track == dest_track);
+    // 为要插入的数据创建一个缓冲区，无论是否自插入
+    int16_t* data_to_insert = malloc(len * sizeof(int16_t));
+    if (!data_to_insert) return;
 
-    int16_t* self_data = NULL;
-    if (is_self_insert) {
-        self_data = malloc(len * sizeof(int16_t));
-        if (!self_data) return;
-        tr_read(src_track, self_data, srcpos, len);
-    }
+    // 读取要插入的数据
+    tr_read(src_track, data_to_insert, srcpos, len);
 
-    seg_node* curr = dest_track->head; //iterate
+    // 查找插入位置
+    seg_node* curr = dest_track->head;
     seg_node* prev = NULL;
     size_t segStart = 0;
 
-    //iterate nodes of ll until find the pos
-    while (curr) {
-        size_t segEnd = segStart + curr->length;
-        if (destpos < segEnd) break;
-        
-        segStart = segEnd;
+    while (curr && segStart + curr->length <= destpos) {
+        segStart += curr->length;
         prev = curr;
         curr = curr->next;
-
     }
 
-    if (curr) {
+    // 如果需要在一个节点中间插入，拆分该节点
+    if (curr && destpos > segStart) {
         size_t offsetInNode = destpos - segStart;
 
-        //judge if it is in middle
-        if (offsetInNode > 0 && offsetInNode < curr->length) {
-            //let the second part in the tail node
-            seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
-            if (!tail_node) {
-                free(self_data);
-                return;
-            }
-
-            tail_node->length = curr->length - offsetInNode;
-            tail_node->shared = curr->shared;
-            tail_node->parent = curr->parent;
-            tail_node->parent_offset = curr->parent_offset + offsetInNode;
-            tail_node->next = curr->next;
-
-            if (curr->samples) {
-                tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
-                if (!tail_node->samples) {
-                    free(tail_node);
-                    free(self_data);
-                    return;
-                }
-                memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
-            } else {
-                tail_node->samples = NULL;
-            }
-
-            //the first half data is curr
-            curr->length = offsetInNode;
-
-            curr->next = tail_node;
-        }
-
-        //creat shared node
-        seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
-        if (!shared_node) {
-            free(self_data);
+        // 创建一个新节点用于存储后半部分
+        seg_node* tail_node = malloc(sizeof(seg_node));
+        if (!tail_node) {
+            free(data_to_insert);
             return;
         }
 
-        shared_node->length = len;
-        shared_node->next = curr->next;
-
-        if(is_self_insert) {
-            shared_node->shared = false;
-            shared_node->parent = NULL;
-            shared_node->parent_offset = 0;
-            shared_node->samples = self_data;
+        if (curr->shared) {
+            // 对于共享节点，保持共享状态
+            tail_node->samples = NULL;
+            tail_node->shared = true;
+            tail_node->parent = curr->parent;
+            tail_node->parent_offset = curr->parent_offset + offsetInNode;
         } else {
-            shared_node->shared = true;
-            shared_node->parent = (sound_seg*)src_track;
-            shared_node->parent_offset = srcpos;
-            shared_node->samples = NULL;
-            free(self_data);
-        }
-        
-
-        //insert the shared node
-        if (!dest_track->head) {
-            dest_track->head = shared_node;
-        } else if (!curr) {
-            if (prev) {
-                prev->next = shared_node;
-            } else {
-                dest_track->head = shared_node;
+            // 对于非共享节点，复制数据
+            tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
+            if (!tail_node->samples) {
+                free(tail_node);
+                free(data_to_insert);
+                return;
             }
-        } else {
-            // shared_node->next = curr->next;
-            // curr->next = shared_node;
-            curr->next = shared_node;
-        
+            memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
+            tail_node->shared = false;
+            tail_node->parent = NULL;
+            tail_node->parent_offset = 0;
         }
 
-        dest_track->length += len;
+        tail_node->length = curr->length - offsetInNode;
+        tail_node->next = curr->next;
 
+        // 更新当前节点为前半部分
+        curr->length = offsetInNode;
+        curr->next = tail_node;
+
+        // 更新指针，以便插入新节点
+        prev = curr;
+        curr = tail_node;
     }
 
-    return;
+    // 创建新节点来存储要插入的数据
+    seg_node* insert_node = malloc(sizeof(seg_node));
+    if (!insert_node) {
+        free(data_to_insert);
+        return;
+    }
+
+    // 无论是否自插入，都直接使用复制的数据，避免共享
+    insert_node->samples = data_to_insert;
+    insert_node->length = len;
+    insert_node->shared = false;
+    insert_node->parent = NULL;
+    insert_node->parent_offset = 0;
+
+    // 插入新节点
+    if (prev) {
+        insert_node->next = prev->next;
+        prev->next = insert_node;
+    } else {
+        insert_node->next = dest_track->head;
+        dest_track->head = insert_node;
+    }
+
+    // 更新目标轨道长度
+    dest_track->length += len;
 }
 
 // get target and correlation with ad
