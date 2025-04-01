@@ -579,6 +579,7 @@ void tr_insert(struct sound_seg* src_track,
         struct sound_seg* dest_track,
         size_t destpos, size_t srcpos, size_t len) {
     // Check edge cases
+    bool self_insert = (src_track == dest_track);
     if (!src_track || !dest_track || len == 0) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     if (srcpos >= src_track->length) return;
@@ -601,34 +602,41 @@ void tr_insert(struct sound_seg* src_track,
 
     if (curr) {
         size_t offsetInNode = destpos - segStart;
-
-        // Split the node if inserting in the middle
+        // If inserting in the middle, split the node.
         if (offsetInNode > 0 && offsetInNode < curr->length) {
-            // Create tail_node for the second part of the split
             seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
             if (!tail_node) return;
-
-            tail_node->length = curr->length - offsetInNode;
-            tail_node->shared = curr->shared;
-            tail_node->parent = curr->parent;
-            tail_node->next = curr->next;
-            
-            // Handle the parent_offset for shared nodes
-            if (curr->shared) {
-                tail_node->parent_offset = curr->parent_offset + offsetInNode;
-                tail_node->samples = NULL;
-            } else {
-                // Only copy data if not shared
-                tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
+            if (self_insert) {
+                // For self-insert, do a deep copy of the tail portion so that the parent's data remains intact.
+                tail_node->length = curr->length - offsetInNode;
+                tail_node->shared = false;  // deep copy tail portion
+                tail_node->parent = NULL;
+                tail_node->samples = malloc(tail_node->length * sizeof(int16_t));
                 if (!tail_node->samples) {
                     free(tail_node);
                     return;
                 }
-                memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
+                memcpy(tail_node->samples, curr->samples + offsetInNode, tail_node->length * sizeof(int16_t));
                 tail_node->parent_offset = 0;
+            } else {
+                // Original behavior for non self-insert: preserve shared status.
+                tail_node->length = curr->length - offsetInNode;
+                tail_node->shared = curr->shared;
+                tail_node->parent = curr->parent;
+                if (curr->shared) {
+                    tail_node->parent_offset = curr->parent_offset + offsetInNode;
+                    tail_node->samples = NULL;
+                } else {
+                    tail_node->samples = malloc(tail_node->length * sizeof(int16_t));
+                    if (!tail_node->samples) {
+                        free(tail_node);
+                        return;
+                    }
+                    memcpy(tail_node->samples, curr->samples + offsetInNode, tail_node->length * sizeof(int16_t));
+                    tail_node->parent_offset = 0;
+                }
             }
-
-            // Update current node to represent only the first part
+            tail_node->next = curr->next;
             curr->length = offsetInNode;
             curr->next = tail_node;
         }
