@@ -618,92 +618,76 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
 
 // Insert a portion of src_track into dest_track at position destpos
 void tr_insert(struct sound_seg* src_track,
-            struct sound_seg* dest_track,
-            size_t destpos, size_t srcpos, size_t len) {
-    //check egde
+        struct sound_seg* dest_track,
+        size_t destpos, size_t srcpos, size_t len) {
+    // Check edge cases
     if (!src_track || !dest_track || len == 0) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     if (srcpos >= src_track->length) return;
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
     if (len == 0) return;
 
-    // if (src_track == dest_track) {
-    //     int16_t* temp = malloc(len * sizeof(int16_t));
-    //     if (!temp) return;
-    //     tr_read(src_track, temp, srcpos, len);
-
-    //     tr_write(dest_track, temp, destpos, len);
-    //     free(temp);
-
-    //     int16_t* filler = malloc(len * sizeof(int16_t));
-    //     if (!filler) return;
-    //     for (size_t i = 0; i < len; i++) {
-    //         filler[i] = -10;
-    //     }
-    //     tr_write(src_track, filler, srcpos, len);
-    //     free(filler);
-        
-    //     return;
-    // }
-
-    seg_node* curr = dest_track->head; //iterate
+    // Find the node where destpos is located
+    seg_node* curr = dest_track->head;
     seg_node* prev = NULL;
     size_t segStart = 0;
 
-    //iterate nodes of ll until find the pos
     while (curr) {
         size_t segEnd = segStart + curr->length;
-        if (destpos < segEnd) break;
-        
+    if (destpos < segEnd) break;
+
         segStart = segEnd;
         prev = curr;
         curr = curr->next;
-
     }
 
     if (curr) {
         size_t offsetInNode = destpos - segStart;
 
-        //judge if it is in middle
+        // Split the node if inserting in the middle
         if (offsetInNode > 0 && offsetInNode < curr->length) {
-            //let the second part in the tail node
+            // Create tail_node for the second part of the split
             seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
             if (!tail_node) return;
 
             tail_node->length = curr->length - offsetInNode;
             tail_node->shared = curr->shared;
             tail_node->parent = curr->parent;
-            tail_node->parent_offset = curr->parent_offset + offsetInNode;
             tail_node->next = curr->next;
-
-            if (curr->samples) {
+            
+            // Handle the parent_offset for shared nodes
+            if (curr->shared) {
+                tail_node->parent_offset = curr->parent_offset + offsetInNode;
+                tail_node->samples = NULL;
+            } else {
+                // Only copy data if not shared
                 tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
                 if (!tail_node->samples) {
                     free(tail_node);
                     return;
                 }
                 memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
-            } else {
-                tail_node->samples = NULL;
+                tail_node->parent_offset = 0;
             }
 
-            //the first half data is curr
+            // Update current node to represent only the first part
             curr->length = offsetInNode;
-
             curr->next = tail_node;
         }
 
-        //creat shared node
+        // Create a shared node pointing to the source track
         seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
         if (!shared_node) return;
+
+        // Always create a fully shared node
         shared_node->length = len;
         shared_node->shared = true;
-        shared_node->parent = (sound_seg*)src_track;
+        shared_node->parent = src_track;
         shared_node->parent_offset = srcpos;
+        shared_node->samples = NULL;  // Shared nodes don't need their own samples
         shared_node->next = NULL;
-        shared_node->samples = NULL;
 
-        //insert the shared node
+        // Insert the shared node into the list
         if (!dest_track->head) {
             dest_track->head = shared_node;
         } else if (!curr) {
@@ -713,16 +697,42 @@ void tr_insert(struct sound_seg* src_track,
                 dest_track->head = shared_node;
             }
         } else {
+            // Insert after the current node (which might be the first half of a split)
             shared_node->next = curr->next;
             curr->next = shared_node;
-        
         }
 
+        // Update the destination track length
         dest_track->length += len;
+    } else if (prev) {
+        // Insert at the end if we have a previous node
+        seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
+        if (!shared_node) return;
 
+        shared_node->length = len;
+        shared_node->shared = true;
+        shared_node->parent = src_track;
+        shared_node->parent_offset = srcpos;
+        shared_node->samples = NULL;
+        shared_node->next = NULL;
+
+        prev->next = shared_node;
+        dest_track->length += len;
+    } else {
+        // Handle the case of an empty destination track
+        seg_node* shared_node = (seg_node*)malloc(sizeof(seg_node));
+        if (!shared_node) return;
+
+        shared_node->length = len;
+        shared_node->shared = true;
+        shared_node->parent = src_track;
+        shared_node->parent_offset = srcpos;
+        shared_node->samples = NULL;
+        shared_node->next = NULL;
+
+        dest_track->head = shared_node;
+        dest_track->length += len;
     }
-
-    return;
 }
 
 // get target and correlation with ad
