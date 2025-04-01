@@ -604,22 +604,47 @@ void tr_insert(struct sound_seg* src_track,
         size_t offsetInNode = destpos - segStart;
         // If inserting in the middle, split the node.
         if (offsetInNode > 0 && offsetInNode < curr->length) {
-            seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
-            if (!tail_node) return;
             if (self_insert) {
-                // For self-insert, do a deep copy of the tail portion so that the parent's data remains intact.
-                tail_node->length = curr->length - offsetInNode;
-                tail_node->shared = false;  // deep copy tail portion
-                tail_node->parent = NULL;
-                tail_node->samples = malloc(tail_node->length * sizeof(int16_t));
-                if (!tail_node->samples) {
-                    free(tail_node);
+                // For self-insert, split the node into two shared nodes without deep copying.
+                // Create head node for the portion before insertion.
+                seg_node* head_node = (seg_node*)malloc(sizeof(seg_node));
+                if (!head_node) return;
+                head_node->length = offsetInNode;
+                head_node->shared = true;
+                // 如果 curr 是共享，则使用其 parent，否则使用 dest_track 自身
+                head_node->parent = curr->shared ? curr->parent : dest_track;
+                head_node->parent_offset = curr->shared ? curr->parent_offset : 0;
+                head_node->samples = NULL;
+                
+                // Create tail node for the portion after insertion.
+                seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
+                if (!tail_node) {
+                    free(head_node);
                     return;
                 }
-                memcpy(tail_node->samples, curr->samples + offsetInNode, tail_node->length * sizeof(int16_t));
-                tail_node->parent_offset = 0;
+                tail_node->length = curr->length - offsetInNode;
+                tail_node->shared = true;
+                tail_node->parent = curr->shared ? curr->parent : dest_track;
+                tail_node->parent_offset = curr->shared ? (curr->parent_offset + offsetInNode) : offsetInNode;
+                tail_node->samples = NULL;
+                
+                // Link the new nodes: head_node -> tail_node, and replace curr with head_node.
+                head_node->next = tail_node;
+                tail_node->next = curr->next;
+                
+                if (prev) {
+                    prev->next = head_node;
+                } else {
+                    dest_track->head = head_node;
+                }
+                
+                // Free the original node and set curr to head_node for further insertion.
+                free(curr);
+                curr = head_node;
             } else {
                 // Original behavior for non self-insert: preserve shared status.
+                seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
+                if (!tail_node) return;
                 tail_node->length = curr->length - offsetInNode;
                 tail_node->shared = curr->shared;
                 tail_node->parent = curr->parent;
@@ -635,10 +660,10 @@ void tr_insert(struct sound_seg* src_track,
                     memcpy(tail_node->samples, curr->samples + offsetInNode, tail_node->length * sizeof(int16_t));
                     tail_node->parent_offset = 0;
                 }
+                tail_node->next = curr->next;
+                curr->length = offsetInNode;
+                curr->next = tail_node;
             }
-            tail_node->next = curr->next;
-            curr->length = offsetInNode;
-            curr->next = tail_node;
         }
 
         // Create a shared node pointing to the source track
