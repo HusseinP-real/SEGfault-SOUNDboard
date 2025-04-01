@@ -166,11 +166,21 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
         
         //judge if pos is in the current node
         if (pos < segEnd) {
-            size_t offsetInNode = (pos > segStart) ? pos - segStart : 0;
+            size_t offsetInNode;
+            if (pos > segStart) {
+                offsetInNode = pos - segStart;
+            } else {
+                offsetInNode = 0;
+            }
 
             //calculate the length to read
             size_t available = curr->length - offsetInNode;
-            size_t toRead = (len - totalRead < available) ? (len - totalRead) : available;
+            size_t toRead;
+            if (len - totalRead < available) {
+                toRead = len - totalRead;
+            } else {
+                toRead = available;
+            }
 
             //check if the data is shared
             if (curr->shared && curr->parent) {
@@ -303,10 +313,20 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         
         //judge if pos is in the current node
         if (pos < segEnd) {
-            size_t offsetInNode = (pos > segStart) ? pos - segStart : 0;
+            size_t offsetInNode;
+            if (pos > segStart) {
+                offsetInNode = pos - segStart;
+            } else {
+                offsetInNode = 0;
+            }
             //calculate the length to write
             size_t available = curr->length - offsetInNode;
-            size_t toWrite = (len - totalWritten < available) ? (len - totalWritten) : available;
+            size_t toWrite;
+            if (len - totalWritten < available) {
+                toWrite = len - totalWritten;
+            } else {
+                toWrite = available;
+            }
 
             //check if the data is shared
             if (curr->shared && curr->parent) {
@@ -567,7 +587,11 @@ void tr_insert(struct sound_seg* src_track,
             tail_node->parent_offset = curr->parent_offset + offsetInNode;
             tail_node->next = curr->next;
 
-            tail_node->samples = (curr->samples) ? (curr->samples + offsetInNode) : NULL;
+            if (curr->samples) {
+                tail_node->samples = curr->samples + offsetInNode;
+            } else {
+                tail_node->samples = NULL;
+            }
 
             //the first half data is curr
             curr->length = offsetInNode;
