@@ -527,6 +527,15 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 
         }
 
+        seg_node* updater = node;
+        size_t adjustment = nodeDeletedLen;
+        while (updater) {
+            if (updater->shared && updater->parent == node->parent) {
+                updater->parent_offset -= adjustment;
+            }
+            updater = updater->next;
+        }
+
         deleted += nodeDeletedLen;
         offset = offset + node_start + nodeDeletedLen;
 
