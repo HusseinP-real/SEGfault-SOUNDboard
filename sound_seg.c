@@ -698,14 +698,19 @@ void tr_insert(struct sound_seg* src_track,
             seg_node* tail_node = (seg_node*)malloc(sizeof(seg_node));
             if (!tail_node) return;
 
-            tail_node->length = curr->length - offsetInNode;
+            tail_node->length -=  offsetInNode;
             tail_node->shared = curr->shared;
             tail_node->parent = curr->parent;
-            tail_node->parent_offset = curr->parent_offset + offsetInNode;
+            tail_node->parent_offset += offsetInNode;
             tail_node->next = curr->next;
 
             if (curr->samples) {
-                tail_node->samples = curr->samples + offsetInNode;
+                tail_node->samples = malloc((curr->length - offsetInNode) * sizeof(int16_t));
+                if (!tail_node->samples) {
+                    free(tail_node);
+                    return;
+                }
+                memcpy(tail_node->samples, curr->samples + offsetInNode, (curr->length - offsetInNode) * sizeof(int16_t));
             } else {
                 tail_node->samples = NULL;
             }
