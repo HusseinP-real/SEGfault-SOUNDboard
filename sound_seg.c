@@ -306,42 +306,41 @@ void tr_write(struct sound_seg* track, const int16_t* src, size_t pos, size_t le
 
 // Delete a range of elements from the track
 bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
-    //edge
-    if (!track || !track->head || !track->head->samples) return false;
+    // Check edge cases
+    if (!track || !track->head) return false;
     if (pos >= track->length) return false;
     if (pos + len > track->length) len = track->length - pos;
+    if (len == 0) return true;  // Nothing to delete
 
     size_t offset = 0;
     size_t deleted = 0;
     seg_node* prev = NULL;
     seg_node* node = track->head;
 
+    // Find the starting node for deletion
     while (node && offset + node->length <= pos) {
         offset += node->length;
         prev = node;
         node = node->next;
     }
 
+    // Process deletion across potentially multiple nodes
     while (node && deleted < len) {
-        size_t node_start;
-        if (pos > offset) {
-            node_start = pos - offset;
-        } else {
-            node_start = 0;
-        }
-        size_t remainingToDeleted = len - deleted;
-        size_t nodeDeletedLen;
-        if (node_start + remainingToDeleted <= node->length) {
-            nodeDeletedLen = remainingToDeleted;
-        } else {
-            nodeDeletedLen = node->length - node_start;
+        size_t node_start = (pos > offset) ? (pos - offset) : 0;
+        size_t remainingToDelete = len - deleted;
+        size_t nodeDeleteLen = (node_start + remainingToDelete <= node->length) ? 
+                               remainingToDelete : (node->length - node_start);
+
+        // Cannot delete if node is a parent (shared by other tracks)
+        if (node->shared) {
+            // Check if this is a parent node with children
+            // This is a simplification - in a complete implementation, 
+            // you would need to track children for each node
+            return false;
         }
 
-        //if shared cannot deleted
-        if (node->shared) return false;
-
-        //delete hole node
-        if (node_start == 0 && nodeDeletedLen == node->length) {
+        // Case 1: Delete entire node
+        if (node_start == 0 && nodeDeleteLen == node->length) {
             seg_node* toDelete = node;
             node = node->next;
 
@@ -350,85 +349,96 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
             } else {
                 track->head = node;
             }
+            
+            // Free resources
             if (toDelete->samples && !toDelete->shared) {
                 free(toDelete->samples);
             }
             free(toDelete);
         }
-
-        //delete the head to somewhere
+        // Case 2: Delete from beginning of node
         else if (node_start == 0) {
-            //if is not shared
             if (!node->shared) {
-                memmove(node->samples, node->samples + nodeDeletedLen, (node->length - nodeDeletedLen) * sizeof(int16_t));
-                node->length -= nodeDeletedLen;
-                if (node->parent) node->parent_offset += nodeDeletedLen;
-            }       
-            //if is shared node
-            else {
-                seg_node* new_node = (seg_node*)malloc(sizeof(seg_node));
-                if (!new_node) return false;
-                new_node->length = node->length - nodeDeletedLen;
-                new_node->shared = node->shared;
-                new_node->parent = node->parent;
-                new_node->parent_offset = node->parent_offset + nodeDeletedLen;
-                new_node->next = node->next;
+                // Shift remaining data to the front
+                memmove(node->samples, 
+                        node->samples + nodeDeleteLen, 
+                        (node->length - nodeDeleteLen) * sizeof(int16_t));
+                node->length -= nodeDeleteLen;
+            } else {
+                // Create a new node that points to later part of parent
+                seg_node* newNode = malloc(sizeof(seg_node));
+                if (!newNode) return false;
+                
+                newNode->length = node->length - nodeDeleteLen;
+                newNode->shared = true;
+                newNode->parent = node->parent;
+                newNode->parent_offset = node->parent_offset + nodeDeleteLen;
+                newNode->samples = NULL;
+                newNode->next = node->next;
+                
                 if (prev) {
-                    prev->next = new_node;
+                    prev->next = newNode;
                 } else {
-                    track->head = new_node;
+                    track->head = newNode;
                 }
+                
                 free(node);
-                node = new_node;
+                node = newNode;
             }
         }
-        //delete somewhere to tail
-        else if (node_start + nodeDeletedLen == node->length) {
-            node->length -= nodeDeletedLen;
+        // Case 3: Delete from end of node
+        else if (node_start + nodeDeleteLen == node->length) {
+            node->length -= nodeDeleteLen;
             prev = node;
             node = node->next;
         }
-        //delete middle
+        // Case 4: Delete from middle of node
         else {
-            //creat a node to store the rest
-            seg_node* after_node = (seg_node*)malloc(sizeof(seg_node));
-            if (!after_node) return false;
-            size_t after_len = node->length - node_start - nodeDeletedLen;
+            // Create a node for the part after deletion
+            seg_node* afterNode = malloc(sizeof(seg_node));
+            if (!afterNode) return false;
+            
+            size_t afterLen = node->length - node_start - nodeDeleteLen;
+            
             if (!node->shared) {
-                after_node->samples = malloc(after_len * sizeof(int16_t));
-                if (!after_node->samples) {
-                    free(after_node);
+                // Copy the data after deletion point
+                afterNode->samples = malloc(afterLen * sizeof(int16_t));
+                if (!afterNode->samples) {
+                    free(afterNode);
                     return false;
                 }
-                memcpy(after_node->samples, node->samples + node_start + nodeDeletedLen, after_len * sizeof(int16_t));
-                after_node->length = after_len;
-                after_node->shared = false;
-                after_node->parent = NULL;
-                after_node->parent_offset = 0;
+                
+                memcpy(afterNode->samples, 
+                       node->samples + node_start + nodeDeleteLen, 
+                       afterLen * sizeof(int16_t));
+                
+                afterNode->length = afterLen;
+                afterNode->shared = false;
+                afterNode->parent = NULL;
+                afterNode->parent_offset = 0;
             } else {
-                after_node->samples = NULL;
-                after_node->length = after_len;
-                after_node->shared = true;
-                after_node->parent = node->parent;
-                after_node->parent_offset = node->parent_offset + node_start + nodeDeletedLen;
+                // Point to the part after deletion in parent
+                afterNode->samples = NULL;
+                afterNode->length = afterLen;
+                afterNode->shared = true;
+                afterNode->parent = node->parent;
+                afterNode->parent_offset = node->parent_offset + node_start + nodeDeleteLen;
             }
-            after_node->next = node->next;
-            node->next = after_node;
+            
+            afterNode->next = node->next;
+            node->next = afterNode;
             node->length = node_start;
-            prev = after_node;
-            node = after_node->next;
-
+            
+            prev = afterNode;
+            node = afterNode->next;
         }
 
-        deleted += nodeDeletedLen;
-        offset = offset + node_start + nodeDeletedLen;
-
-        pos += nodeDeletedLen;
-
+        deleted += nodeDeleteLen;
+        offset += node_start + nodeDeleteLen;
     }
 
+    // Update track length
     track->length -= len;
-
     return true;
 }
 
