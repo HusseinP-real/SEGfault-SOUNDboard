@@ -627,24 +627,24 @@ void tr_insert(struct sound_seg* src_track,
     if (srcpos + len > src_track->length) len = src_track->length - srcpos;
     if (len == 0) return;
 
-    if (src_track == dest_track) {
-        int16_t* temp = malloc(len * sizeof(int16_t));
-        if (!temp) return;
-        tr_read(src_track, temp, srcpos, len);
+    // if (src_track == dest_track) {
+    //     int16_t* temp = malloc(len * sizeof(int16_t));
+    //     if (!temp) return;
+    //     tr_read(src_track, temp, srcpos, len);
 
-        tr_write(dest_track, temp, destpos, len);
-        free(temp);
+    //     tr_write(dest_track, temp, destpos, len);
+    //     free(temp);
 
-        int16_t* filler = malloc(len * sizeof(int16_t));
-        if (!filler) return;
-        for (size_t i = 0; i < len; i++) {
-            filler[i] = -10;
-        }
-        tr_write(src_track, filler, srcpos, len);
-        free(filler);
+    //     int16_t* filler = malloc(len * sizeof(int16_t));
+    //     if (!filler) return;
+    //     for (size_t i = 0; i < len; i++) {
+    //         filler[i] = -10;
+    //     }
+    //     tr_write(src_track, filler, srcpos, len);
+    //     free(filler);
         
-        return;
-    }
+    //     return;
+    // }
 
     seg_node* curr = dest_track->head; //iterate
     seg_node* prev = NULL;
