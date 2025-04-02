@@ -478,7 +478,7 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
         //delete middle
         else {
             if(node->child_count > 0 || node->shared) return false;
-            
+
             //creat a node to store the rest
             seg_node* after_node = (seg_node*)malloc(sizeof(seg_node));
             if (!after_node) return false;
@@ -688,6 +688,12 @@ void tr_insert(struct sound_seg* src_track,
 
         seg_node* tail_node = malloc(sizeof(seg_node));
         if (!tail_node) return;
+
+        if (curr->shared || curr->child_count > 0) {
+            free(tail_node);
+            return;
+        }
+    
 
         tail_node->length = curr->length - offsetInNode;
         tail_node->shared = curr->shared;
