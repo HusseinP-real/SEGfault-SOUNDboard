@@ -423,6 +423,7 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 
         //delete hole node
         if (node_start == 0 && nodeDeletedLen == node->length) {
+            if(node->child_count > 0 || node->shared) return false;
             seg_node* toDelete = node;
             node = node->next;
 
@@ -439,6 +440,8 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 
         //delete the head to somewhere
         else if (node_start == 0) {
+            if(node->child_count > 0 || node->shared) return false;
+
             //if is not shared
             if (!node->shared) {
                 memmove(node->samples, node->samples + nodeDeletedLen, (node->length - nodeDeletedLen) * sizeof(int16_t));
@@ -467,12 +470,15 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
         }
         //delete somewhere to tail
         else if (node_start + nodeDeletedLen == node->length) {
+            if(node->child_count > 0 || node->shared) return false;
             node->length -= nodeDeletedLen;
             prev = node;
             node = node->next;
         }
         //delete middle
         else {
+            if(node->child_count > 0 || node->shared) return false;
+            
             //creat a node to store the rest
             seg_node* after_node = (seg_node*)malloc(sizeof(seg_node));
             if (!after_node) return false;
