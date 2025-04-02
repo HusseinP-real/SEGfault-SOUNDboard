@@ -253,6 +253,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
     size_t totalWritten = 0;
     size_t segStart = 0;
     seg_node* curr = track->head;
+    seg_node* prev = NULL;
     
     // If pos equals track->length or linked list is empty, append a new node at tail
     if (pos == track->length || !curr) {
@@ -290,21 +291,50 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         size_t segEnd = segStart + curr->length;
         if (pos < segEnd) {
             size_t offsetInNode;
-            if (pos > segStart)
+            if (pos > segStart) {
                 offsetInNode = pos - segStart;
-            else
+            } else {
                 offsetInNode = 0;
+            }
+                
             
             size_t available = curr->length - offsetInNode;
             size_t toWrite;
-            if (len - totalWritten < available)
+            if (len - totalWritten < available) {
                 toWrite = len - totalWritten;
-            else
+            } else {
                 toWrite = available;
+            }
+                
 
             if ((curr->shared || curr->child_count > 0) && (offsetInNode != 0 || toWrite < curr->length)) {
-                return; 
-            }
+               seg_node* unshared_node = malloc(sizeof(seg_node));
+               if (!unshared_node) return;
+
+               unshared_node->length = curr->length;
+               unshared_node->samples = malloc(unshared_node->length * sizeof(int16_t));
+               if (!unshared_node->samples) {
+                   free(unshared_node);
+                   return;
+               }
+               memcpy(unshared_node->samples, curr->samples,
+                      unshared_node->length * sizeof(int16_t));
+
+               unshared_node->shared = false;
+               unshared_node->child_count = 0;
+               unshared_node->parent = NULL;
+               unshared_node->parent_offset = 0;
+               unshared_node->next = curr->next;
+
+               if (prev) {
+                   prev->next = unshared_node;
+               } else {
+                   track->head = unshared_node;
+               }
+
+               curr = unshared_node;
+               segEnd = segStart + curr->length; 
+           }
             
             //if current node is shared
             if (curr->shared && curr->parent) {
@@ -337,6 +367,7 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
         }
 
         segStart = segEnd;
+        prev = curr;
         curr = curr->next;
 
     }
@@ -690,14 +721,35 @@ void tr_insert(struct sound_seg* src_track,
     if (curr && destpos > segStart) {
         size_t offsetInNode = destpos - segStart;
 
+        if (offsetInNode != 0 && offsetInNode < curr->length && (curr->shared || curr->child_count > 0)) {
+            seg_node* unshared_node = malloc(sizeof(seg_node));
+            if (!unshared_node) return; // minimal error handling
+            unshared_node->length = curr->length;
+            unshared_node->samples = malloc(unshared_node->length * sizeof(int16_t));
+            if (!unshared_node->samples) {
+                free(unshared_node);
+                return;
+            }
+            memcpy(unshared_node->samples, curr->samples,
+                   unshared_node->length * sizeof(int16_t));
+
+            unshared_node->shared = false;
+            unshared_node->child_count = 0;
+            unshared_node->parent = NULL;
+            unshared_node->parent_offset = 0;
+            unshared_node->next = curr->next;
+
+            if (prev) {
+                prev->next = unshared_node;
+            } else {
+                dest_track->head = unshared_node;
+            }
+            curr = unshared_node;
+        }
+
         seg_node* tail_node = malloc(sizeof(seg_node));
         if (!tail_node) return;
 
-        if (curr->shared || curr->child_count > 0) {
-            free(tail_node);
-            return;
-        }
-    
 
         tail_node->length = curr->length - offsetInNode;
         tail_node->shared = curr->shared;
