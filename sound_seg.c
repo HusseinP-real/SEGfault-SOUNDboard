@@ -383,7 +383,7 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
     while (curr_check) {
         size_t next_pos = check_pos + curr_check->length;
 
-        if (!(pos + len <= check_pos || pos >= next_pos)) {
+        if (next_pos > pos && check_pos < pos + len) {
             if (curr_check->child_count > 0) {
                 return false;
             }
