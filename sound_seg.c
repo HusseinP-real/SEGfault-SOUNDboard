@@ -301,6 +301,10 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
                 toWrite = len - totalWritten;
             else
                 toWrite = available;
+
+            if ((curr->shared || curr->child_count > 0) && (offsetInNode != 0 || toWrite < curr->length)) {
+                return; 
+            }
             
             //if current node is shared
             if (curr->shared && curr->parent) {
