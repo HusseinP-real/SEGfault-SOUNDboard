@@ -308,33 +308,48 @@ void tr_write(struct sound_seg* track, int16_t* src, size_t pos, size_t len) {
                 
 
             if ((curr->shared || curr->child_count > 0) && (offsetInNode != 0 || toWrite < curr->length)) {
-               seg_node* unshared_node = malloc(sizeof(seg_node));
-               if (!unshared_node) return;
 
-               unshared_node->length = curr->length;
-               unshared_node->samples = malloc(unshared_node->length * sizeof(int16_t));
-               if (!unshared_node->samples) {
-                   free(unshared_node);
-                   return;
-               }
-               memcpy(unshared_node->samples, curr->samples,
-                      unshared_node->length * sizeof(int16_t));
+                seg_node* old_node = curr;
+                
 
-               unshared_node->shared = false;
-               unshared_node->child_count = 0;
-               unshared_node->parent = NULL;
-               unshared_node->parent_offset = 0;
-               unshared_node->next = curr->next;
+                seg_node* unshared_node = malloc(sizeof(seg_node));
+                if (!unshared_node) return;
+                unshared_node->length = curr->length;
+                unshared_node->samples = malloc(unshared_node->length * sizeof(int16_t));
+                if (!unshared_node->samples) {
+                    free(unshared_node);
+                    return;
+                }
+                memcpy(unshared_node->samples, curr->samples, unshared_node->length * sizeof(int16_t));
 
-               if (prev) {
-                   prev->next = unshared_node;
-               } else {
-                   track->head = unshared_node;
-               }
+                unshared_node->shared = false;
+                unshared_node->child_count = 0;
+                unshared_node->parent = NULL;
+                unshared_node->parent_offset = 0;
+                unshared_node->next = curr->next;
+                
 
-               curr = unshared_node;
-               segEnd = segStart + curr->length; 
-           }
+                if (prev) {
+                    prev->next = unshared_node;
+                } else {
+                    track->head = unshared_node;
+                }
+                
+
+                {
+                    seg_node* temp = track->head;
+                    while (temp) {
+                        if (temp->parent == old_node) {
+                            temp->parent = unshared_node;
+                        }
+                        temp = temp->next;
+                    }
+                }
+                
+
+                curr = unshared_node;
+                segEnd = segStart + curr->length;
+            }
             
             //if current node is shared
             if (curr->shared && curr->parent) {
