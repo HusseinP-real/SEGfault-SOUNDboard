@@ -232,63 +232,114 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 }
 
 // 更新: tr_write 重新实现，确保父子关系中的数据正确传播
-void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
-    // Check edge cases
-    if (!track || !dest) return;
-    if (pos >= track->length) return;
+void tr_write(struct sound_seg* track, const int16_t* src, size_t pos, size_t len) {
+    if (!track || !src || len == 0) return;
 
-    // Calculate how many elements can be read
-    size_t can_read = track->length - pos;
-    if (len > can_read) len = can_read;
-
-    size_t totalRead = 0;
-    size_t segStart = 0;
-
-    // 遍历链表
-    seg_node* curr = track->head;
-    while (curr && totalRead < len) {
-        size_t segEnd = segStart + curr->length;
+    // If position is beyond track length, set pos to the end
+    if (pos > track->length) pos = track->length;
+    
+    // Case 1: If writing at the end of the track, append a new node
+    if (pos == track->length) {
+        seg_node* newNode = malloc(sizeof(seg_node));
+        if (!newNode) return;
         
+        newNode->samples = malloc(len * sizeof(int16_t));
+        if (!newNode->samples) {
+            free(newNode);
+            return;
+        }
+        
+        memcpy(newNode->samples, src, len * sizeof(int16_t));
+        newNode->length = len;
+        newNode->shared = false;
+        newNode->parent = NULL;
+        newNode->parent_offset = 0;
+        newNode->child_count = 0;
+        newNode->next = NULL;
+        
+        // Add to the end of the list
+        if (!track->head) {
+            track->head = newNode;
+        } else {
+            seg_node* current = track->head;
+            while (current->next) {
+                current = current->next;
+            }
+            current->next = newNode;
+        }
+        
+        track->length += len;
+        return;
+    }
+    
+    // Case 2: Writing within existing nodes
+    size_t totalWritten = 0;
+    size_t segStart = 0;
+    seg_node* curr = track->head;
+    
+    while (curr && totalWritten < len) {
+        size_t segEnd = segStart + curr->length;
         if (pos < segEnd) {
-            // 计算当前节点内的位置
             size_t offsetInNode = (pos > segStart) ? (pos - segStart) : 0;
-            
-            // 计算从该节点读取多少数据
             size_t available = curr->length - offsetInNode;
-            size_t toRead = (len - totalRead < available) ? (len - totalRead) : available;
+            size_t toWrite = (len - totalWritten < available) ? (len - totalWritten) : available;
             
             // 处理共享数据
             if (curr->shared && curr->parent) {
-                // 创建临时缓冲区用于从父轨道读取数据
-                int16_t* temp_buffer = malloc(toRead * sizeof(int16_t));
-                if (!temp_buffer) return;
+                // 查找父轨道中对应的节点
+                struct sound_seg* parent = curr->parent;
+                size_t parentPos = curr->parent_offset + offsetInNode;
                 
-                // 从父轨道正确的偏移位置读取数据
-                size_t parent_pos = curr->parent_offset + offsetInNode;
-                
-                // 从父轨道读取数据
-                tr_read(curr->parent, temp_buffer, parent_pos, toRead);
-                
-                // 复制数据到目标缓冲区
-                memcpy(dest + totalRead, temp_buffer, toRead * sizeof(int16_t));
-                
-                // 释放临时缓冲区
-                free(temp_buffer);
+                // 直接在父轨道上写入数据
+                tr_write(parent, src + totalWritten, parentPos, toWrite);
             } else {
-                // 直接复制非共享数据
-                memcpy(dest + totalRead, curr->samples + offsetInNode, toRead * sizeof(int16_t));
+                // 直接写入非共享数据
+                memcpy(curr->samples + offsetInNode, src + totalWritten, toWrite * sizeof(int16_t));
             }
             
-            // 更新追踪变量
-            totalRead += toRead;
-            pos += toRead;
+            totalWritten += toWrite;
+            pos += toWrite;
         }
         
-        // 移动到下一个节点
         segStart = segEnd;
         curr = curr->next;
     }
+    
+    // Case 3: 如果还有数据未写入，并且已经到达轨道末尾，创建一个新节点
+    if (totalWritten < len) {
+        size_t remaining = len - totalWritten;
+        seg_node* newNode = malloc(sizeof(seg_node));
+        if (!newNode) return;
+        
+        newNode->samples = malloc(remaining * sizeof(int16_t));
+        if (!newNode->samples) {
+            free(newNode);
+            return;
+        }
+        
+        memcpy(newNode->samples, src + totalWritten, remaining * sizeof(int16_t));
+        newNode->length = remaining;
+        newNode->shared = false;
+        newNode->parent = NULL;
+        newNode->parent_offset = 0;
+        newNode->child_count = 0;
+        newNode->next = NULL;
+        
+        // 添加到列表末尾
+        if (!track->head) {
+            track->head = newNode;
+        } else {
+            seg_node* current = track->head;
+            while (current->next) {
+                current = current->next;
+            }
+            current->next = newNode;
+        }
+        
+        track->length += remaining;
+    }
 }
+
 
 // 更新: 检查是否节点是父节点（有子节点）
 static bool is_parent_node(seg_node* node) {
