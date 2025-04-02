@@ -5,144 +5,129 @@
 #include <string.h>
 #include <stdio.h>
 
-// A node represents a single sample
-typedef struct node {
-    int16_t value;             // The sample value
-    struct node* next;         // Next sample in the track
-    struct node* parent;       // If this is a child, points to parent node
-    struct node* child;        // If this is a parent, points to first child node
-    struct node* sibling;      // Next child of the same parent
-    bool has_children;         // Flag indicating if this node has children
-} node;
+// 每个音频样本是一个独立的结构体
+typedef struct sample {
+    int16_t value;                 // 样本值
+    struct sample* parent;         // 如果是子样本，指向父样本
+    struct sound_seg* parent_track; // 父样本所在的轨道
+    size_t parent_pos;             // 父样本在其轨道中的位置
+    bool has_children;             // 标识此样本是否有子样本
+} sample;
 
-// A sound segment is a linked list of nodes
+// 音轨是样本的数组
 struct sound_seg {
-    node* head;                // First node in the track
-    size_t length;             // Number of samples in the track
+    sample** samples;              // 样本数组
+    size_t length;                 // 轨道长度（样本数量）
+    size_t capacity;               // 样本数组的容量
 };
 
-// Helper function to find a node at a specific position
-static node* find_node_at_position(struct sound_seg* track, size_t pos) {
-    if (!track || !track->head || pos >= track->length) {
-        return NULL;
-    }
+// 辅助函数：创建新样本
+static sample* create_sample(int16_t value) {
+    sample* new_sample = (sample*)malloc(sizeof(sample));
+    if (!new_sample) return NULL;
     
-    node* current = track->head;
-    size_t current_pos = 0;
+    new_sample->value = value;
+    new_sample->parent = NULL;
+    new_sample->parent_track = NULL;
+    new_sample->parent_pos = 0;
+    new_sample->has_children = false;
     
-    while (current && current_pos < pos) {
-        current = current->next;
-        current_pos++;
-    }
-    
-    return current;
+    return new_sample;
 }
 
-// Helper function to create a new node
-static node* create_node(int16_t value) {
-    node* new_node = (node*)malloc(sizeof(node));
-    if (!new_node) return NULL;
+// 辅助函数：确保轨道有足够容量
+static bool ensure_capacity(struct sound_seg* track, size_t required_capacity) {
+    if (!track) return false;
     
-    new_node->value = value;
-    new_node->next = NULL;
-    new_node->parent = NULL;
-    new_node->child = NULL;
-    new_node->sibling = NULL;
-    new_node->has_children = false;
+    if (track->capacity >= required_capacity) return true;
     
-    return new_node;
+    // 如果需要更多容量，则增加到下一个2的幂
+    size_t new_capacity = track->capacity > 0 ? track->capacity : 1;
+    while (new_capacity < required_capacity) {
+        new_capacity *= 2;
+    }
+    
+    // 重新分配内存
+    sample** new_samples = (sample**)realloc(track->samples, new_capacity * sizeof(sample*));
+    if (!new_samples) return false;
+    
+    track->samples = new_samples;
+    track->capacity = new_capacity;
+    return true;
 }
 
-// Helper function to propagate a write to all related nodes
-static void propagate_write(node* start_node, int16_t value) {
-    if (!start_node) return;
+// 辅助函数：将写入传播到所有相关样本
+static void propagate_write(sample* samp, int16_t value) {
+    if (!samp) return;
     
-    // Track visited nodes to avoid infinite loops
-    node* visited[1000] = {NULL}; // Using fixed size for simplicity
-    size_t visited_count = 0;
+    // 设置当前样本的值
+    samp->value = value;
     
-    // Start with the given node
-    node* stack[1000] = {start_node}; // Using fixed size for simplicity
-    size_t stack_count = 1;
+    // 传播到父样本
+    if (samp->parent) {
+        samp->parent->value = value;
+    }
     
-    while (stack_count > 0) {
-        // Pop a node from the stack
-        node* current = stack[--stack_count];
+    // 传播到同一父样本的其他子样本（"兄弟"样本）
+    if (samp->parent && samp->parent_track) {
+        struct sound_seg* parent_track = samp->parent_track;
+        size_t parent_pos = samp->parent_pos;
         
-        // Check if we've visited this node before
-        bool already_visited = false;
-        for (size_t i = 0; i < visited_count; i++) {
-            if (visited[i] == current) {
-                already_visited = true;
-                break;
+        // 查找所有引用同一父样本的样本并更新
+        for (size_t i = 0; i < parent_track->length; i++) {
+            sample* other = parent_track->samples[i];
+            if (other->parent && other != samp && 
+                other->parent_track == samp->parent_track && 
+                other->parent_pos == parent_pos) {
+                other->value = value;
             }
         }
-        
-        if (already_visited) continue;
-        
-        // Mark as visited
-        visited[visited_count++] = current;
-        
-        // Update the value
-        current->value = value;
-        
-        // Add parent to the stack if it exists
-        if (current->parent && stack_count < 1000) {
-            stack[stack_count++] = current->parent;
-        }
-        
-        // Add children to the stack if they exist
-        node* child = current->child;
-        while (child && stack_count < 1000) {
-            stack[stack_count++] = child;
-            child = child->sibling;
-        }
     }
 }
 
-// Load a WAV file into buffer
+// 从WAV文件加载到缓冲区
 void wav_load(const char* fname, int16_t* dest) {
     FILE* f = fopen(fname, "rb");
     if (!f) return;
     
-    // Skip the WAV header (44 bytes)
+    // 跳过WAV头部（44字节）
     fseek(f, 44, SEEK_SET);
     
-    // Calculate data size
+    // 计算数据大小
     fseek(f, 0, SEEK_END);
     long fileSize = ftell(f);
     long dataSize = fileSize - 44;
     
-    // Read the data
+    // 读取数据
     fseek(f, 44, SEEK_SET);
     fread(dest, 1, dataSize, f);
     
     fclose(f);
 }
 
-// Create/write a WAV file from buffer
+// 从缓冲区创建/写入WAV文件
 void wav_save(const char* fname, const int16_t* src, size_t len) {
     FILE* f = fopen(fname, "wb");
     if (!f) return;
     
-    // Calculate data size
+    // 计算数据大小
     uint32_t dataSize = (uint32_t)(len * sizeof(int16_t));
     uint32_t chunkSize = 36 + dataSize;
     
-    // Write RIFF header
+    // 写入RIFF头部
     fwrite("RIFF", 1, 4, f);
     fwrite(&chunkSize, sizeof(uint32_t), 1, f);
     fwrite("WAVE", 1, 4, f);
     
-    // Write format chunk
+    // 写入格式块
     fwrite("fmt ", 1, 4, f);
     uint32_t subchunk1Size = 16; // PCM
     fwrite(&subchunk1Size, sizeof(uint32_t), 1, f);
     
     uint16_t audioFormat = 1; // PCM
-    uint16_t numChannels = 1; // Mono
+    uint16_t numChannels = 1; // 单声道
     uint32_t sampleRate = 8000; // 8kHz
-    uint16_t bitsPerSample = 16; // 16-bit
+    uint16_t bitsPerSample = 16; // 16位
     uint16_t blockAlign = numChannels * (bitsPerSample / 8);
     uint32_t byteRate = sampleRate * blockAlign;
     
@@ -153,7 +138,7 @@ void wav_save(const char* fname, const int16_t* src, size_t len) {
     fwrite(&blockAlign, sizeof(uint16_t), 1, f);
     fwrite(&bitsPerSample, sizeof(uint16_t), 1, f);
     
-    // Write data chunk
+    // 写入数据块
     fwrite("data", 1, 4, f);
     fwrite(&dataSize, sizeof(uint32_t), 1, f);
     fwrite(src, sizeof(int16_t), len, f);
@@ -161,212 +146,132 @@ void wav_save(const char* fname, const int16_t* src, size_t len) {
     fclose(f);
 }
 
-// Initialize a new sound_seg object
+// 初始化新的sound_seg对象
 struct sound_seg* tr_init() {
     struct sound_seg* track = (struct sound_seg*)malloc(sizeof(struct sound_seg));
     if (!track) return NULL;
     
-    track->head = NULL;
+    track->samples = NULL;
     track->length = 0;
+    track->capacity = 0;
     
     return track;
 }
 
-// Destroy a sound_seg object and free all allocated memory
+// 销毁sound_seg对象并释放所有分配的内存
 void tr_destroy(struct sound_seg* track) {
     if (!track) return;
     
-    node* current = track->head;
-    while (current) {
-        node* next = current->next;
-        
-        // Remove parent-child relationships
-        if (current->parent) {
-            // Detach from parent
-            node* parent = current->parent;
-            if (parent->child == current) {
-                parent->child = current->sibling;
-            } else {
-                node* sibling = parent->child;
-                while (sibling && sibling->sibling != current) {
-                    sibling = sibling->sibling;
-                }
-                if (sibling) {
-                    sibling->sibling = current->sibling;
-                }
+    // 释放所有样本
+    for (size_t i = 0; i < track->length; i++) {
+        if (track->samples[i]) {
+            // 在释放内存前，清除父子关系
+            if (track->samples[i]->parent) {
+                track->samples[i]->parent->has_children = false;
             }
             
-            // Check if parent has any children left
-            if (parent->child == NULL) {
-                parent->has_children = false;
-            }
+            free(track->samples[i]);
         }
-        
-        // Free the node
-        free(current);
-        current = next;
     }
     
+    // 释放样本数组
+    free(track->samples);
+    
+    // 释放轨道结构体
     free(track);
 }
 
-// Return the length of the segment
+// 返回段的长度
 size_t tr_length(struct sound_seg* track) {
     if (!track) return 0;
     return track->length;
 }
 
-// Read len elements from position pos into dest
+// 从位置pos读取len个元素到dest
 void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
     if (!track || !dest || pos >= track->length) return;
     
-    // Adjust len if it would read past the end of the track
+    // 调整len，如果它会超出轨道末尾
     if (pos + len > track->length) {
         len = track->length - pos;
     }
     
-    // Find the starting node
-    node* current = find_node_at_position(track, pos);
-    if (!current) return;
-    
-    // Copy the values to the destination buffer
-    for (size_t i = 0; i < len && current; i++) {
-        dest[i] = current->value;
-        current = current->next;
+    // 复制值到目标缓冲区
+    for (size_t i = 0; i < len; i++) {
+        dest[i] = track->samples[pos + i]->value;
     }
 }
 
-// Write len elements from src into position pos
+// 从src写入len个元素到位置pos
 void tr_write(struct sound_seg* track, const int16_t* src, size_t pos, size_t len) {
     if (!track || !src || len == 0) return;
     
-    // If position is beyond current length, adjust to append
+    // 如果位置超出当前长度，调整为追加
     if (pos > track->length) {
         pos = track->length;
     }
     
-    // Case 1: Writing to an empty track or appending
-    if (track->length == 0 || pos == track->length) {
-        node* prev = NULL;
-        if (track->length > 0) {
-            // Find the last node
-            prev = find_node_at_position(track, track->length - 1);
-        }
-        
-        // Create new nodes for each sample
+    // 确保有足够容量
+    if (!ensure_capacity(track, pos + len)) return;
+    
+    // 如果写入位置在当前末尾（追加）
+    if (pos == track->length) {
+        // 为每个新样本创建新对象
         for (size_t i = 0; i < len; i++) {
-            node* new_node = create_node(src[i]);
-            if (!new_node) return;
+            sample* new_sample = create_sample(src[i]);
+            if (!new_sample) return;
             
-            if (prev) {
-                prev->next = new_node;
-            } else {
-                track->head = new_node;
-            }
-            
-            prev = new_node;
+            track->samples[track->length++] = new_sample;
         }
-        
-        track->length += len;
-        return;
-    }
-    
-    // Case 2: Writing at some position in the middle
-    node* current = find_node_at_position(track, pos);
-    
-    for (size_t i = 0; i < len; i++) {
-        if (!current) {
-            // We've run out of nodes, append a new one
-            node* new_node = create_node(src[i]);
-            if (!new_node) return;
-            
-            node* last = find_node_at_position(track, track->length - 1);
-            if (last) {
-                last->next = new_node;
+    } else {
+        // 写入现有位置
+        for (size_t i = 0; i < len; i++) {
+            if (pos + i < track->length) {
+                // 现有样本 - 传播写入
+                propagate_write(track->samples[pos + i], src[i]);
             } else {
-                track->head = new_node;
+                // 新样本 - 创建并追加
+                sample* new_sample = create_sample(src[i]);
+                if (!new_sample) return;
+                
+                track->samples[track->length++] = new_sample;
             }
-            
-            track->length++;
-            current = new_node;
-        } else {
-            // Propagate the write to all related nodes
-            propagate_write(current, src[i]);
-            current = current->next;
         }
     }
 }
 
-// Delete a range of elements from the track
+// 从轨道中删除一系列元素
 bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
     if (!track || pos >= track->length) return false;
     
-    // Adjust len if it would delete past the end of the track
+    // 调整len，如果它会超出轨道末尾
     if (pos + len > track->length) {
         len = track->length - pos;
     }
     
-    // Find the nodes just before and at the deletion range
-    node* prev = (pos > 0) ? find_node_at_position(track, pos - 1) : NULL;
-    node* start = find_node_at_position(track, pos);
-    
-    // Check if any node in the range has children
-    node* current = start;
-    for (size_t i = 0; i < len && current; i++) {
-        if (current->has_children) {
-            return false; // Can't delete a parent node
+    // 检查范围内的样本是否有子样本
+    for (size_t i = 0; i < len; i++) {
+        if (track->samples[pos + i]->has_children) {
+            return false; // 不能删除有子样本的样本
         }
-        current = current->next;
     }
     
-    // Find the node after the deletion range
-    node* end = start;
-    for (size_t i = 0; i < len && end; i++) {
-        end = end->next;
+    // 释放被删除的样本
+    for (size_t i = 0; i < len; i++) {
+        free(track->samples[pos + i]);
     }
     
-    // Remove the nodes from the track
-    if (prev) {
-        prev->next = end;
-    } else {
-        track->head = end;
-    }
+    // 移动剩余样本以填补空缺
+    memmove(&track->samples[pos], &track->samples[pos + len], 
+            (track->length - pos - len) * sizeof(sample*));
     
-    // Disconnect nodes from their parents
-    current = start;
-    while (current != end) {
-        node* next = current->next;
-        
-        if (current->parent) {
-            // Detach from parent
-            node* parent = current->parent;
-            if (parent->child == current) {
-                parent->child = current->sibling;
-            } else {
-                node* sibling = parent->child;
-                while (sibling && sibling->sibling != current) {
-                    sibling = sibling->sibling;
-                }
-                if (sibling) {
-                    sibling->sibling = current->sibling;
-                }
-            }
-            
-            // Check if parent has any children left
-            if (parent->child == NULL) {
-                parent->has_children = false;
-            }
-        }
-        
-        free(current);
-        current = next;
-    }
-    
+    // 更新轨道长度
     track->length -= len;
+    
     return true;
 }
 
-// Helper function for calculating cross-correlation
+// 辅助函数：计算互相关
 double cross_correlation(const int16_t* a, const int16_t* b, size_t len) {
     double sum = 0.0;
     for (size_t i = 0; i < len; i++) {
@@ -375,12 +280,12 @@ double cross_correlation(const int16_t* a, const int16_t* b, size_t len) {
     return sum;
 }
 
-// Helper function for calculating auto-correlation
+// 辅助函数：计算自相关
 double auto_correlation(const int16_t* a, size_t len) {
     return cross_correlation(a, a, len);
 }
 
-// Returns a string containing <start>,<end> ad pairs in target
+// 返回包含目标中<start>,<end>广告对的字符串
 char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     if (!target || !ad) {
         char* result = (char*)malloc(1);
@@ -397,7 +302,7 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
         return result;
     }
     
-    // Extract samples into contiguous arrays for processing
+    // 将样本提取到连续数组中进行处理
     int16_t* target_samples = (int16_t*)malloc(target_len * sizeof(int16_t));
     int16_t* ad_samples = (int16_t*)malloc(ad_len * sizeof(int16_t));
     
@@ -412,11 +317,11 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     tr_read((struct sound_seg*)target, target_samples, 0, target_len);
     tr_read((struct sound_seg*)ad, ad_samples, 0, ad_len);
     
-    // Calculate reference auto-correlation and threshold
+    // 计算参考自相关和阈值
     double reference = auto_correlation(ad_samples, ad_len);
     double threshold = reference * 0.95;
     
-    // Prepare result string
+    // 准备结果字符串
     size_t result_capacity = 256;
     char* result = (char*)malloc(result_capacity);
     if (!result) {
@@ -430,9 +335,9 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     size_t match_count = 0;
     size_t last_end = 0;
     
-    // Search for matches
+    // 搜索匹配项
     for (size_t pos = 0; pos <= target_len - ad_len; pos++) {
-        // Skip positions that would overlap with previous matches
+        // 跳过与先前匹配重叠的位置
         if (pos <= last_end) {
             continue;
         }
@@ -443,12 +348,12 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
             size_t end = pos + ad_len - 1;
             last_end = end;
             
-            // Format the match as "start,end"
+            // 将匹配格式化为"start,end"
             char buffer[64];
             int len = snprintf(buffer, sizeof(buffer), "%s%zu,%zu", 
                                (match_count > 0) ? "\n" : "", start, end);
             
-            // Ensure we have enough space
+            // 确保我们有足够的空间
             if (result_len + len + 1 > result_capacity) {
                 result_capacity *= 2;
                 char* new_result = (char*)realloc(result, result_capacity);
@@ -461,7 +366,7 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
                 result = new_result;
             }
             
-            // Append to result
+            // 追加到结果
             strcat(result, buffer);
             result_len += len;
             match_count++;
@@ -473,56 +378,43 @@ char* tr_identify(const struct sound_seg* target, const struct sound_seg* ad) {
     return result;
 }
 
-// Insert a portion of src_track into dest_track at position destpos
+// 将src_track的一部分插入到dest_track的位置destpos
 void tr_insert(struct sound_seg* src_track, struct sound_seg* dest_track,
                size_t destpos, size_t srcpos, size_t len) {
     if (!src_track || !dest_track || len == 0) return;
     
-    // Validate positions
+    // 验证位置
     if (srcpos >= src_track->length) return;
     if (destpos > dest_track->length) destpos = dest_track->length;
     
-    // Adjust len if it would read past the end of src_track
+    // 调整len，如果它会超出src_track的末尾
     if (srcpos + len > src_track->length) {
         len = src_track->length - srcpos;
     }
     
-    // Find the source nodes to be inserted
-    node* src_start = find_node_at_position(src_track, srcpos);
-    if (!src_start) return;
+    // 确保目标轨道有足够空间
+    if (!ensure_capacity(dest_track, dest_track->length + len)) return;
     
-    // Find the destination position
-    node* dest_prev = (destpos > 0) ? find_node_at_position(dest_track, destpos - 1) : NULL;
-    node* dest_next = destpos < dest_track->length ? find_node_at_position(dest_track, destpos) : NULL;
-    
-    // Insert nodes at the destination position
-    node* src_current = src_start;
-    node* dest_prev_updated = dest_prev;
-    
-    for (size_t i = 0; i < len && src_current; i++) {
-        // Create a new node that references the source node
-        node* new_node = create_node(src_current->value);
-        if (!new_node) return;
-        
-        // Set up parent-child relationship
-        new_node->parent = src_current;
-        new_node->sibling = src_current->child;
-        src_current->child = new_node;
-        src_current->has_children = true;
-        
-        // Insert the new node into the destination track
-        if (dest_prev_updated) {
-            new_node->next = dest_prev_updated->next;
-            dest_prev_updated->next = new_node;
-        } else {
-            new_node->next = dest_track->head;
-            dest_track->head = new_node;
-        }
-        
-        dest_prev_updated = new_node;
-        src_current = src_current->next;
+    // 为插入腾出空间
+    if (destpos < dest_track->length) {
+        memmove(&dest_track->samples[destpos + len], &dest_track->samples[destpos],
+                (dest_track->length - destpos) * sizeof(sample*));
     }
     
-    // Update the destination track length
+    // 插入新样本
+    for (size_t i = 0; i < len; i++) {
+        sample* new_sample = create_sample(src_track->samples[srcpos + i]->value);
+        if (!new_sample) return;
+        
+        // 设置父子关系
+        new_sample->parent = src_track->samples[srcpos + i];
+        new_sample->parent_track = src_track;
+        new_sample->parent_pos = srcpos + i;
+        src_track->samples[srcpos + i]->has_children = true;
+        
+        // 将新样本放入目标轨道
+        dest_track->samples[destpos + i] = new_sample;
+    }
+    
     dest_track->length += len;
 }
