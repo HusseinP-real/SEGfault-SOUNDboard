@@ -207,7 +207,7 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
                 size_t parent_offset = curr->parent_offset + offsetInNode;
                 
                 while (parent_curr) {
-                    size_t next_pos = parent_pos + parent_curr;
+                    size_t next_pos = parent_pos + parent_curr->length;
                     if(parent_offset < next_pos) {
                         size_t offsetInParent = parent_offset - parent_pos;
                         if (parent_curr->shared) {
@@ -378,7 +378,7 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
 
     //check if delete len has father nodes
     size_t check_pos = 0;
-    seg_node* curr_check = track->length;
+    seg_node* curr_check = track->head;
 
     while (curr_check) {
         size_t next_pos = check_pos + curr_check->length;
@@ -449,10 +449,10 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
             else {
                 seg_node* new_node = (seg_node*)malloc(sizeof(seg_node));
                 if (!new_node) return false;
-                new_node->length -= nodeDeletedLen;
+                new_node->length = node->length - nodeDeletedLen;
                 new_node->shared = node->shared;
                 new_node->parent = node->parent;
-                new_node->parent_offset += nodeDeletedLen;
+                new_node->parent_offset = node->parent_offset + nodeDeletedLen;
                 new_node->next = node->next;
                 if (prev) {
                     prev->next = new_node;
