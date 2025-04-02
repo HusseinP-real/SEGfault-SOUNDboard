@@ -477,6 +477,9 @@ bool tr_delete_range(struct sound_seg* track, size_t pos, size_t len) {
             seg_node* after_node = (seg_node*)malloc(sizeof(seg_node));
             if (!after_node) return false;
             size_t after_len = node->length - node_start - nodeDeletedLen;
+
+            after_node->child_count = 0;
+
             if (!node->shared) {
                 after_node->samples = malloc(after_len * sizeof(int16_t));
                 if (!after_node->samples) {
