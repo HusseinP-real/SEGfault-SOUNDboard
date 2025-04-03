@@ -197,9 +197,6 @@ void tr_read(struct sound_seg* track, int16_t* dest, size_t pos, size_t len) {
 
                         //check if parent node is shared(parent has parent)
                         if (parent_curr->shared && parent_curr->parent) {
-                            
-                            sound_seg* curr_parent = parent_curr->parent;
-                            size_t curr_offset =  parent_curr->parent_offset + parent_offset;
                             seg_node* data_node = parent_curr;
                             size_t data_offset = parent_offset;
 
